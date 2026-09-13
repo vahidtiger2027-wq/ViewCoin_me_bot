@@ -1243,16 +1243,6 @@ async def admin_back(call: CallbackQuery):
 
 
 # =========================
-# FALLBACK FOR ADMIN MENU ITEMS
-# =========================
-
-@dp.callback_query(F.data == "adm_settings")
-async def admin_settings_duplicate(call: CallbackQuery):
-    # این هندلر عمداً وجود ندارد؛ هندلر اصلی بالاتر آن را مدیریت می‌کند.
-    pass
-
-
-# =========================
 # WEBHOOK / FASTAPI
 # =========================
 
