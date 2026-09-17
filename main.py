@@ -169,3 +169,7 @@ def admin_menu(uid): rows=[ [("⚙️ تنظیم سفارشات ویو","aset_vi
 @app.get("/payment/callback") async def payment_callback(payment_id:Optional[int]=None,status:Optional[str]=None): # این مسیر فقط اسکلت callback است؛ تأیید واقعی باید طبق API درگاه پیاده‌سازی شود. return {"ok":True,"payment_id":payment_id,"status":status}
 @app.post("/telegram/webhook") async def webhook(update:dict): from aiogram.types import Update await dp.feed_update(bot,Update.model_validate(update)) return {"ok":True}
 @app.on_event("startup") async def startup(): init_db() if WEBHOOK_URL: await bot.set_webhook(f"{WEBHOOK_URL}/telegram/webhook") else: await bot.delete_webhook(drop_pending_updates=True)
+@app.on_event("shutdown") async def shutdown(): await bot.session.close()
+if name=="main": import uvicorn init_db() uvicorn.run(app,host="0.0.0.0",port=PORT) '''
+req = """aiogram>=3.7,<4 fastapi>=0.110 uvicorn[standard]>=0.29 """
+out = Path("/mnt/data/ViewCoin_main.py") out.write_text(main_py, encoding="utf-8") Path("/mnt/data/requirements.txt").write_text(req, encoding="utf-8") print("ساخته شد:", out) print("main.py lines:", len(main_py.splitlines())) print("requirements.txt آماده است.")
