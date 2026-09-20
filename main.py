@@ -1,27 +1,97 @@
-text.contains('انتقال الماس'))
-async def transfer_diamond(m:Message,state:FSMContext): await state.update_data(kind='diamonds'); await state.set_state(Flow.transfer_id); await m.answer('شناسه عددی گیرنده را ارسال کنید.',reply_markup=back_kb())
-@dp.message(Flow.transfer_id)
-async def transfer_id(m:Message,state:FSMContext):
-    if not m.text or not m.text.isdigit(): await m.answer('شناسه باید عددی باشد.'); return
-    await state.update_data(target=int(m.text)); await state.set_state(Flow.transfer_amount); await m.answer('مقدار را ارسال کنید.',reply_markup=back_kb())
-@dp.message(Flow.transfer_amount)
-async def transfer_amount(m:Message,state:FSMContext):
-    if not m.text or not m.text.isdigit() or int(m.text)<=0: await m.answer('مقدار نامعتبر است.'); return
-    d=((F. lot:
-        c.c=db(); winner=c.execute('SELECT id FROM users ORDER BY total_views DESC LIMIT 1').fetchone()
-                    if winner:
-                        typ=getset('monthly_gift_type','coins'); field='diamonds' if typ=='diamonds' else 'coins'; c.execute(f'UPDATE users SET {field}={field}+?,gift=gift+? WHERE id=?',(amount,amount,winner['id'])); c.commit()
-                    c.close()
-                setset('last_gift_month',month)
-        except Exception: pass
-        await asyncio.sleep(60)
-@asynccontextmanager
-async def lifespan(app):
-    init_db()
-    if WEBHOOK_URL: await bot.set_webhook(WEBHOOK_URL.rstrip('/')+'/telegram/webhook')
-    task=asyncio.create_task(scheduler()); yield; task.cancel(); await bot.delete_webhook(); await bot.session.close()
-app=FastAPI(lifespan=lifespan)
-@app.get('/')
-async def root(): return {'status':'ok','bot':'ViewCoin'}
-@app.post('/telegram/webhook')
-async def webhook(request:Request): data=await request.json(); await dp.feed_raw_update(bot,data); return {'ok':True}
+import os
+import asyncio
+from flask import Flask, request
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
+
+# دریافت مقادیر حساس از Variableهای Render
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")  # آدرس اتوماتیک رندر
+
+# ساخت اپلیکیشن Flask جهت پینگ و وب‌هوک
+app = Flask(__name__)
+
+# تعریف ساختار ربات تلگرام
+ptb_app = Application.builder().token(BOT_TOKEN).build()
+
+# ----------------- هندلرهای تلگرام -----------------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """پیام خوش‌آمدگویی و منوی اصلی"""
+    user_name = update.effective_user.first_name
+    
+    keyboard = [
+        [InlineKeyboardButton("💰 دریافت سکه", callback_data="get_coins")],
+        [
+            InlineKeyboardButton("📢 ممبر اجباری", callback_data="forced_member"),
+            InlineKeyboardButton("👁 ویو اجباری", callback_data="forced_view")
+        ],
+        [
+            InlineKeyboardButton("🚀 ثبت سفارش", callback_data="order"),
+            InlineKeyboardButton("👤 حساب کاربری", callback_data="profile")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"سلام {user_name} عزیز! 👋\n\nبه ربات ممبرگیر و ویوگیر خوش آمدید.\nلطفاً از دکمه‌های زیر استفاده کنید:",
+        reply_markup=reply_markup
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """مدیریت دکمه‌های شیشه‌ای"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if data == "get_coins":
+        await query.edit_message_text("💰 بخش دریافت سکه:\nجهت دریافت سکه باید در کانال‌های تبلیغ شده عضو شوید یا از پست‌ها بازدید کنید.")
+    elif data == "forced_member":
+        await query.edit_message_text("📢 کانال‌های اجباری:\nلطفاً برای فعال‌سازی امکانات ربات، در کانال‌های اسپانسر عضو شده و روی دکمه تایید کلیک کنید.")
+    elif data == "forced_view":
+        await query.edit_message_text("👁 بازدید اجباری:\nپست‌های مشخص شده را بازدید کنید تا سکه ویو دریافت کنید.")
+    elif data == "profile":
+        await query.edit_message_text("👤 **حساب کاربری شما**:\n\n🪙 سکه ممبر: 0\n👁 سکه ویو: 0\n🆔 شناسه کاربری: " + str(query.from_user.id))
+    elif data == "order":
+        await query.edit_message_text("🚀 بخش ثبت سفارش:\nتعداد ممبر یا ویو مدنظر خود را مشخص کنید.")
+
+# افزودن هندلرها به برنامه‌ی تلگرام
+ptb_app.add_handler(CommandHandler("start", start))
+ptb_app.add_handler(CallbackQueryHandler(button_handler))
+
+# ----------------- روت‌های Flask برای Render -----------------
+
+@app.route('/')
+def home():
+    """روت اصلی جهت پینگ زدن توسط UptimeRobot"""
+    return "Bot is alive and running!", 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """دریافت آپدیت‌ها از تلگرام"""
+    if request.method == 'POST':
+        asyncio.run(ptb_app.process_update(
+            Update.de_json(request.get_json(force=True), ptb_app.bot)
+        ))
+        return "OK", 200
+
+# ----------------- راه‌اندازی و تنظیم Webhook -----------------
+
+async def setup_webhook():
+    webhook_url = f"{RENDER_URL}/webhook"
+    await ptb_app.bot.set_webhook(url=webhook_url)
+    print(f"Webhook set to: {webhook_url}")
+
+if __name__ == '__main__':
+    # مقداردهی اولیه ربات و وب‌هوک
+    asyncio.run(ptb_app.initialize())
+    asyncio.run(setup_webhook())
+    
+    # اجرا روی پورتی که Render مشخص می‌کند
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
