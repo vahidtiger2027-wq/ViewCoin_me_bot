@@ -34,6 +34,6 @@ def main():
     # اجرای ربات با مدیریت استاندارد حلقه رویدادها (Event Loop)
     logging.info("ربات روشن شد و آماده دریافت پیام است...")
     application.run_polling(drop_pending_updates=True)
-
-if __name__ == '__main__':
-    main()
+    if __name__ == '__main__':
+    # پاک‌سازی وب‌هوک‌های قبلی و اجرای ربات
+    application.run_polling(drop_pending_updates=True)
