@@ -2,25 +2,37 @@ import os
 import sqlite3
 import datetime
 import logging
-from flask import Flask, request
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters
 )
 
 # ----------------- CONFIGURATION -----------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
-PORT = int(os.environ.get("PORT", 5000))
-
-# آدرس اختصاصی شما در رندر
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://viewcoin-me-bot-10.onrender.com")
+PORT = int(os.environ.get("PORT", 10000))
 
 MEMBER_CHANNEL = "@my_member_man"
 VIEW_CHANNEL = "@view_sin_channel"
 
 logging.basicConfig(level=logging.INFO)
+
+# ----------------- DUMMY SERVER FOR RENDER PORT -----------------
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+def run_dummy_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
+    server.serve_forever()
 
 # ----------------- DATABASE SETUP -----------------
 DB_FILE = "bot_database.db"
@@ -265,35 +277,18 @@ async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TY
         ], resize_keyboard=True)
         await query.message.reply_text("جهت شرکت در قرعه‌کشی، پکیج مورد نظر خود را از فروشگاه خریداری کنید:", reply_markup=kb)
 
-# ----------------- FLASK & WEBHOOK SERVER -----------------
-app = Flask(__name__)
-bot_app = Application.builder().token(BOT_TOKEN).build()
+def main():
+    # روشن کردن سرور پورت در پس‌زمینه برای رضایت Render
+    threading.Thread(target=run_dummy_server, daemon=True).start()
 
-bot_app.add_handler(CommandHandler("start", start))
-bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
-bot_app.add_handler(CallbackQueryHandler(handle_callback))
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot is Active!", 200
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+    application.add_handler(CallbackQueryHandler(handle_callback))
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    if request.method == "POST":
-        update = Update.de_json(request.get_json(force=True), bot_app.bot)
-        await bot_app.process_update(update)
-        return "OK", 200
-
-# تنظیم خودکار وب‌هوک تلگرام هنگام استارت سرور
-async def setup_webhook():
-    webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-    await bot_app.bot.set_webhook(url=webhook_url)
-    logging.info(f"Webhook set to {webhook_url}")
-
-import asyncio
-loop = asyncio.get_event_loop()
-loop.run_until_complete(bot_app.initialize())
-loop.run_until_complete(setup_webhook())
+    logging.info("ربات با موفقیت روشن شد...")
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    main()
