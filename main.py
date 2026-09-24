@@ -2,24 +2,37 @@ import os
 import sqlite3
 import datetime
 import logging
-from flask import Flask, request
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters, ConversationHandler
 )
 
 # ----------------- CONFIGURATION -----------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
-PORT = int(os.environ.get("PORT", 5000))
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+PORT = int(os.environ.get("PORT", 10000))
 
-# کانال‌های ویو و ممبرگیر اصلی ربات
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 
 logging.basicConfig(level=logging.INFO)
+
+# ----------------- DUMMY SERVER FOR RENDER PORT -----------------
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is alive!")
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+def run_dummy_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
+    server.serve_forever()
 
 # ----------------- DATABASE SETUP -----------------
 DB_FILE = "bot_database.db"
@@ -27,7 +40,6 @@ DB_FILE = "bot_database.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # جدول کاربران
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -40,20 +52,11 @@ def init_db():
         today_views INTEGER DEFAULT 0,
         last_daily TEXT,
         lottery_wins INTEGER DEFAULT 0,
-        gift_received INTEGER DEFAULT 0,
-        is_left INTEGER DEFAULT 0
+        gift_received INTEGER DEFAULT 0
     )''')
-    # جدول تنظیمات
     c.execute('''CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
-    )''')
-    # جدول تراکنش‌های فیش واریزی
-    c.execute('''CREATE TABLE IF NOT EXISTS receipts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        photo_id TEXT,
-        status TEXT DEFAULT 'PENDING'
     )''')
 
     defaults = {
@@ -65,16 +68,7 @@ def init_db():
         "gateway_url": "تنظیم نشده",
         "sponsor_channel": "",
         "welcome_msg": "به ربات بزرگ ممبرگیر و ویوگیر خوش آمدید!",
-        "lottery_p1_coin": "50",
-        "lottery_p1_diamond": "20",
-        "lottery_p2_coin": "30",
-        "lottery_p2_diamond": "10",
-        "lottery_p3_coin": "10",
-        "lottery_p3_diamond": "5",
-        "lottery_price_unit": "50000",
-        "lottery_status": "OFF",
-        "forced_days": "3",
-        "forced_penalty": "2"
+        "lottery_price_unit": "50000"
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
@@ -91,13 +85,6 @@ def get_setting(key):
     res = c.fetchone()
     conn.close()
     return res[0] if res else ""
-
-def set_setting(key, val):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(val)))
-    conn.commit()
-    conn.close()
 
 def get_user(user_id, username=""):
     conn = sqlite3.connect(DB_FILE)
@@ -125,17 +112,14 @@ def main_keyboard(user_id):
         kb.append(["▪︎پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-# ----------------- STATES FOR CONVERSATIONS -----------------
-WAITING_POST_VIEW, WAITING_LINK_MEMBER = range(2)
-WAITING_TRANSFER_USER, WAITING_TRANSFER_AMOUNT = range(2, 4)
-WAITING_RECEIPT_PHOTO = 4
+# ----------------- STATES -----------------
+WAITING_TRANSFER_USER, WAITING_TRANSFER_AMOUNT = range(2)
 
-# ----------------- BOT HANDLERS -----------------
+# ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     u_data = get_user(user.id, user.username or "")
     
-    # اسپانسر جوین اجباری
     sponsor = get_setting("sponsor_channel")
     if sponsor and str(sponsor).startswith("@"):
         try:
@@ -147,7 +131,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # زیرمجموعه‌گیری
     if context.args and len(context.args) > 0:
         try:
             ref_id = int(context.args[0])
@@ -280,11 +263,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎫 ۵۰۰.۰۰۰ هزار تومان خرید = ۱۰ بلیت"""
         await update.message.reply_text(msg, reply_markup=ikb)
 
-    elif text in ["💰 انتقال سکه", "💎︎  انتقال الماس"]:
-        context.user_data["transfer_type"] = "coin" if "سکه" in text else "diamond"
-        await update.message.reply_text("لطفاً آیدی عددی اکانت مورد نظر را وارد کنید:")
-        return WAITING_TRANSFER_USER
-
     elif text == "بازگشت به منوی اصلی":
         await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard(user.id))
 
@@ -301,7 +279,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ], resize_keyboard=True)
         await update.message.reply_text("🛠 **پنل مدیریت ربات**", reply_markup=admin_kb)
 
-# ----------------- INLINE CALLBACK HANDLER -----------------
 async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = query_update.callback_query
     await query.answer()
@@ -323,37 +300,12 @@ async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TY
         ], resize_keyboard=True)
         await query.message.reply_text("جهت شرکت در قرعه‌کشی، پکیج مورد نظر را انتخاب کنید:", reply_markup=kb)
 
-    elif data.startswith("v_"):
-        context.user_data["order_view_amount"] = data.split("_")[1]
-        ikb = InlineKeyboardMarkup([[InlineKeyboardButton("تایید و ارسال پست", callback_data="confirm_v_post")]])
-        await query.message.reply_text("پست مورد نظر را بفرستید (توضیحات یا همراه با لینک):", reply_markup=ikb)
+async def start_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    context.user_data["transfer_type"] = "coin" if "سکه" in text else "diamond"
+    await update.message.reply_text("لطفاً آیدی عددی اکانت مورد نظر را وارد کنید:")
+    return WAITING_TRANSFER_USER
 
-    elif data == "confirm_v_post":
-        bot_username = (await context.bot.get_me()).username
-        ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("ثبت بازدید", callback_data="click_view"), InlineKeyboardButton("توربو", callback_data="click_turbo")],
-            [InlineKeyboardButton("بازگشت به ربات", url=f"https://t.me/{bot_username}")]
-        ])
-        await context.bot.send_message(chat_id=VIEW_CHANNEL, text="📌 **پست جدید برای بازدید:**", reply_markup=ikb)
-        await query.message.reply_text("✅ پست شما با موفقیت در کانال ویو ثبت شد!")
-
-    elif data.startswith("m_"):
-        context.user_data["order_member_amount"] = data.split("_")[1]
-        await query.message.reply_text("لطفاً لینک کانال مورد نظر را بفرستید:")
-
-    elif data == "click_view":
-        user_id = query.from_user.id
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("UPDATE users SET coin_view = coin_view + 1, total_views = total_views + 1, today_views = today_views + 1 WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-        await query.answer("✅ ۱ سکه بازدید دریافت کردید!", show_alert=True)
-
-    elif data == "click_turbo":
-        await query.answer("🚀 سیستم توربو فعال است! (به ازای هر ۱۰۰ بازدید ۵۰ سکه اضافه)", show_alert=True)
-
-# ----------------- TRANSFER HANDLERS -----------------
 async def process_transfer_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["target_user_id"] = update.message.text.strip()
     t_type = "سکه" if context.user_data.get("transfer_type") == "coin" else "الماس"
@@ -384,51 +336,32 @@ async def process_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text("✅ انتقال با موفقیت انجام شد.")
             await context.bot.send_message(chat_id=target_id, text=f"🎉 تعداد {amount} {t_type} از طرف کاربر `{sender_id}` به حساب شما واریز شد.")
         conn.close()
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("❌ خطایی رخ داد. آیدی یا مقدار وارد شده معتبر نیست.")
     return ConversationHandler.END
 
-# ----------------- FLASK & WEBHOOK -----------------
-app = Flask(__name__)
-bot_app = Application.builder().token(BOT_TOKEN).build()
+def main():
+    # روشن کردن سرور پورت در پس‌زمینه جهت راضی نگه داشتن Render
+    threading.Thread(target=run_dummy_server, daemon=True).start()
 
-bot_app.add_handler(CommandHandler("start", start))
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-transfer_conv = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex("^(💰 انتقال سکه|💎︎  انتقال الماس)$"), handle_messages)],
-    states={
-        WAITING_TRANSFER_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_user)],
-        WAITING_TRANSFER_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_amount)],
-    },
-    fallbacks=[]
-)
+    transfer_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^(💰 انتقال سکه|💎︎  انتقال الماس)$"), start_transfer)],
+        states={
+            WAITING_TRANSFER_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_user)],
+            WAITING_TRANSFER_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_amount)],
+        },
+        fallbacks=[]
+    )
 
-bot_app.add_handler(transfer_conv)
-bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
-bot_app.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(transfer_conv)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+    application.add_handler(CallbackQueryHandler(handle_callback))
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot Server is Active!", 200
-
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-async def webhook():
-    if request.method == "POST":
-        update = Update.de_json(request.get_json(force=True), bot_app.bot)
-        await bot_app.process_update(update)
-        return "OK", 200
-
-async def setup_webhook():
-    if RENDER_URL:
-        webhook_url = f"{RENDER_URL}/{BOT_TOKEN}"
-        await bot_app.bot.set_webhook(url=webhook_url)
-        logging.info(f"Webhook set to {webhook_url}")
-
-import asyncio
-loop = asyncio.get_event_loop()
-loop.run_until_complete(bot_app.initialize())
-if RENDER_URL:
-    loop.run_until_complete(setup_webhook())
+    logging.info("ربات با موفقیت روشن شد...")
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    main()
