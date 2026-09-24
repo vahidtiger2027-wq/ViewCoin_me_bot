@@ -73,9 +73,7 @@ def init_db():
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     
-    # ادمین سکه نامحدود اولی هم در دیتابیس بگیرد
     c.execute("INSERT OR REPLACE INTO users (user_id, username, coin_view, coin_member) VALUES (?, 'Admin', 999999, 999999)", (ADMIN_ID,))
-
     conn.commit()
     conn.close()
 
@@ -116,26 +114,15 @@ def main_keyboard(user_id):
         kb.append(["▪︎پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-# ----------------- STATES FOR CONVERSATIONS -----------------
+# ----------------- STATES -----------------
 WAITING_TRANSFER_USER, WAITING_TRANSFER_AMOUNT = range(2)
-WAITING_VIEW_POST, WAITING_MEMBER_LINK = range(2, 4)
+WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = range(2, 4)
+WAIT_VIEW_POST, WAIT_VIEW_CONFIRM = range(4, 6)
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    u_data = get_user(user.id, user.username or "")
-    
-    sponsor = get_setting("sponsor_channel")
-    if sponsor and str(sponsor).startswith("@"):
-        try:
-            member_check = await context.bot.get_chat_member(chat_id=sponsor, user_id=user.id)
-            if member_check.status in ["left", "kicked"]:
-                ikb = InlineKeyboardMarkup([[InlineKeyboardButton("📢 عضویت در کانال اسپانسر", url=f"https://t.me/{sponsor[1:]}")]])
-                await update.message.reply_text("❌ جهت استفاده از ربات ابتدا باید در کانال اسپانسر عضو شوید:", reply_markup=ikb)
-                return
-        except Exception:
-            pass
-
+    get_user(user.id, user.username or "")
     welcome_text = get_setting("welcome_msg")
     await update.message.reply_text(f"{welcome_text}\n\nسلام {user.first_name} خوش آمدید!", reply_markup=main_keyboard(user.id))
 
@@ -221,97 +208,143 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ], resize_keyboard=True)
         await update.message.reply_text("به فروشگاه خوش آمدید! بخش مورد نظر را انتخاب کنید:", reply_markup=kb)
 
-    elif text == "👁خرید سکه ویوگیر":
-        ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("20.000 سکه - 50.000 تومان", callback_data="buy_v_50")],
-            [InlineKeyboardButton("40.000 سکه - 100.000 تومان", callback_data="buy_v_100")],
-            [InlineKeyboardButton("50.000 سکه - 150.000 تومان", callback_data="buy_v_150")],
-            [InlineKeyboardButton("200.000 سکه - 200.000 تومان", callback_data="buy_v_200")]
-        ])
-        await update.message.reply_text("پکیج سکه ویوگیر را انتخاب کنید:", reply_markup=ikb)
-
-    elif text == "👁خرید الماس ممبر گیر":
-        ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("100 الماس - 25.000 تومان", callback_data="buy_m_25")],
-            [InlineKeyboardButton("250 الماس - 50.000 تومان", callback_data="buy_m_50")],
-            [InlineKeyboardButton("500 الماس - 100.000 تومان", callback_data="buy_m_100")],
-            [InlineKeyboardButton("1000 الماس - 200.000 تومان", callback_data="buy_m_200")],
-            [InlineKeyboardButton("4000 الماس - 800.000 تومان", callback_data="buy_m_800")]
-        ])
-        await update.message.reply_text("پکیج الماس ممبرگیر را انتخاب کنید:", reply_markup=ikb)
-
-    elif text == "دکمه قرعه کشی":
-        ikb = InlineKeyboardMarkup([[InlineKeyboardButton("فروشگاه", callback_data="go_shop")]])
-        p_unit = get_setting("lottery_price_unit")
-        msg = f"""🎰 **به قرعه‌کشی ربات بزرگ ممبرگیر و ویوگیر خوش آمدید!**
-
-برای ورود در قرعه‌کشی باید از ربات خرید کنید و بلیت شانس دریافت کنید:
-
-🎫 {p_unit} هزار تومان خرید = ۲ بلیت
-🎫 ۱۰۰.۰۰۰ هزار تومان خرید = ۴ بلیت
-🎫 ۲۰۰.۰۰۰ هزار تومان خرید = ۶ بلیت
-🎫 ۵۰۰.۰۰۰ هزار تومان خرید = ۱۰ بلیت"""
-        await update.message.reply_text(msg, reply_markup=ikb)
-
     elif text == "بازگشت به منوی اصلی":
         await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard(user.id))
 
-    elif text == "▪︎پنل مدیریت" and user.id == ADMIN_ID:
-        admin_kb = ReplyKeyboardMarkup([
-            ["تنظیم سفارشات ویو", "تنظیم سفارش ممبر"],
-            ["تنظیم فروشگاه", "تنظیم شماره کارت"],
-            ["تنظیم آیدی/لینک درگاه", "تنظیم سکه و الماس روزانه"],
-            ["تنظیم سکه زیرمجموعه", "تنظیم سکه هدیه"],
-            ["تنظیم جایزه قرعه کشی", "تنظیم شروع قرعه کشی"],
-            ["تنظیم اسپانسر جوین اجباری", "تنظیم پیام خوشامد گویی"],
-            ["آمار کاربران", "تنظیم روز جوین اجباری"],
-            ["بازگشت به منوی اصلی"]
-        ], resize_keyboard=True)
-        await update.message.reply_text("🛠 **پنل مدیریت ربات**", reply_markup=admin_kb)
-
-async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = query_update.callback_query
+# ----------------- ORDER MEMBER FLOW -----------------
+async def start_member_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
     await query.answer()
     data = query.data
     user_id = query.from_user.id
-    card = get_setting("card_number")
-    gate = get_setting("gateway_url")
+    cost = int(data.split("_")[1])
+    u = get_user(user_id)
 
-    if data.startswith("buy_v_") or data.startswith("buy_m_"):
-        ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💱 لینک/پرداخت آنلاین درگاه", url=gate if gate.startswith("http") else "https://t.me")]
-        ])
-        msg = f"💳 **شماره کارت جهت واریز:**\n`{card}`\n\nپس از واریز از طریق شماره کارت، عکس فیش تراکنش را ارسال کنید.\nیا برای واریز آنلاین از دکمه زیر استفاده کنید:"
-        await query.message.reply_text(msg, parse_mode="Markdown", reply_markup=ikb)
+    if user_id != ADMIN_ID and u[3] < cost:
+        await query.message.reply_text(f"❌ موجودی الماس شما کافی نیست! (نیاز به {cost} الماس دارید)")
+        return ConversationHandler.END
 
-    elif data == "go_shop":
-        kb = ReplyKeyboardMarkup([
-            ["👁خرید سکه ویوگیر", "👁خرید الماس ممبر گیر"],
-            ["بازگشت به منوی اصلی"]
-        ], resize_keyboard=True)
-        await query.message.reply_text("جهت شرکت در قرعه‌کشی، پکیج مورد نظر را انتخاب کنید:", reply_markup=kb)
+    context.user_data["member_cost"] = cost
+    context.user_data["member_count"] = cost // 2
+    await query.message.reply_text("🔗 لطفاً لینک عمومی یا خصوصی کانال خود را ارسال کنید:")
+    return WAIT_MEMBER_LINK
 
-    elif data.startswith("v_"):
-        cost = int(data.split("_")[1])
-        u = get_user(user_id)
-        # ادمین محدودیتی در سکه ندارد
-        if user_id != ADMIN_ID and u[2] < cost:
-            await query.message.reply_text(f"❌ موجودی سکه شما کافی نیست! (نیاز به {cost} سکه دارید)")
-            return
-        context.user_data["order_view_cost"] = cost
-        await query.message.reply_text("📩 **پست مورد نظر را ارسال کنید:**\n(حاوی متن، لینک یا رسانه)")
+async def receive_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    link = update.message.text.strip()
+    if not (link.startswith("http://") or link.startswith("https://") or link.startswith("@") or link.startswith("t.me/")):
+        await update.message.reply_text("❌ لینک ارسال شده معتبر نیست! لطفاً یک لینک صحیح بفرستید:")
+        return WAIT_MEMBER_LINK
 
-    elif data.startswith("m_"):
-        cost = int(data.split("_")[1])
-        u = get_user(user_id)
-        # ادمین محدودیتی در الماس ندارد
-        if user_id != ADMIN_ID and u[3] < cost:
-            await query.message.reply_text(f"❌ موجودی الماس شما کافی نیست! (نیاز به {cost} الماس دارید)")
-            return
-        context.user_data["order_member_cost"] = cost
-        await query.message.reply_text("🔗 **لینک کانال مورد نظر را ارسال کنید:**")
+    context.user_data["target_link"] = link
+    count = context.user_data.get("member_count")
+    cost = context.user_data.get("member_cost")
 
-# ----------------- TRANSFER HANDLERS -----------------
+    ikb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ تایید و ثبت سفارش", callback_data="confirm_member_order")],
+        [InlineKeyboardButton("❌ انصراف", callback_data="cancel_order")]
+    ])
+
+    await update.message.reply_text(
+        f"📋 **پیش‌نمایش سفارش ممبر:**\n\n🔗 لینک کانال: {link}\n👥 تعداد ممبر: {count}\n💎 هزینه سفارش: {cost} الماس\n\nآیا سفارش مورد تایید است؟",
+        parse_mode="Markdown",
+        reply_markup=ikb
+    )
+    return WAIT_MEMBER_CONFIRM
+
+async def confirm_member_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    cost = context.user_data.get("member_cost")
+    count = context.user_data.get("member_count")
+    link = context.user_data.get("target_link")
+
+    if user_id != ADMIN_ID:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET coin_member = coin_member - ? WHERE user_id=?", (cost, user_id))
+        conn.commit()
+        conn.close()
+
+    try:
+        ikb = InlineKeyboardMarkup([[InlineKeyboardButton("📢 عضویت در کانال", url=link if link.startswith("http") else f"https://t.me/{link.replace('@', '')}")]])
+        await context.bot.send_message(
+            chat_id=MEMBER_CHANNEL,
+            text=f"📢 **سفارش جدید ممبرگیر**\n\nبرای دریافت سکه در کانال زیر عضو شوید:\nتعداد مورد نیاز: {count} ممبر",
+            reply_markup=ikb
+        )
+        await query.message.edit_text("✅ سفارش شما با موفقیت ثبت شد و به کانال ممبرگیر ارسال گردید.")
+    except Exception as e:
+        await query.message.edit_text(f"✅ سفارش ثبت شد ولی ارسال به کانال ممبرگیر به دلیل مشکل تنظیم کانال با خطا مواجه شد:\n`{e}`", parse_mode="Markdown")
+
+    return ConversationHandler.END
+
+# ----------------- ORDER VIEW FLOW -----------------
+async def start_view_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+    cost = int(data.split("_")[1])
+    u = get_user(user_id)
+
+    if user_id != ADMIN_ID and u[2] < cost:
+        await query.message.reply_text(f"❌ موجودی سکه شما کافی نیست! (نیاز به {cost} سکه دارید)")
+        return ConversationHandler.END
+
+    context.user_data["view_cost"] = cost
+    context.user_data["view_count"] = cost
+    await query.message.reply_text("📩 لطفاً پست مورد نظر خود را فوروارد کنید یا فرستید:")
+    return WAIT_VIEW_POST
+
+async def receive_view_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["post_message_id"] = update.message.message_id
+    context.user_data["post_chat_id"] = update.message.chat_id
+
+    cost = context.user_data.get("view_cost")
+    count = context.user_data.get("view_count")
+
+    ikb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ تایید و ثبت سفارش", callback_data="confirm_view_order")],
+        [InlineKeyboardButton("❌ انصراف", callback_data="cancel_order")]
+    ])
+
+    await update.message.reply_text(
+        f"📋 **پیش‌نمایش سفارش ویو:**\n\n👁 تعداد بازدید: {count}\n💰 هزینه سفارش: {cost} سکه\n\nآیا از ارسال این پست مطمئن هستید؟",
+        reply_markup=ikb
+    )
+    return WAIT_VIEW_CONFIRM
+
+async def confirm_view_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    cost = context.user_data.get("view_cost")
+    msg_id = context.user_data.get("post_message_id")
+    chat_id = context.user_data.get("post_chat_id")
+
+    if user_id != ADMIN_ID:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET coin_view = coin_view - ? WHERE user_id=?", (cost, user_id))
+        conn.commit()
+        conn.close()
+
+    try:
+        await context.bot.forward_message(chat_id=VIEW_CHANNEL, from_chat_id=chat_id, message_id=msg_id)
+        await query.message.edit_text("✅ پست شما با موفقیت ثبت شد و به کانال ویوگیر ارسال گردید.")
+    except Exception as e:
+        await query.message.edit_text(f"✅ سفارش ثبت شد ولی ارسال به کانال ویوگیر به دلیل عدم تنظیم درست کانال با خطا مواجه شد:\n`{e}`", parse_mode="Markdown")
+
+    return ConversationHandler.END
+
+async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.edit_text("❌ سفارش لغو شد.")
+    return ConversationHandler.END
+
+# ----------------- TRANSFER FLOW -----------------
 async def start_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     context.user_data["transfer_type"] = "coin" if "سکه" in text else "diamond"
@@ -339,7 +372,6 @@ async def process_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
         field = "coin_view" if t_type == "coin" else "coin_member"
         balance = sender[0] if t_type == "coin" else sender[1]
 
-        # ادمین اجازه انتقال بدون محدودیت دارد
         if sender_id != ADMIN_ID and balance < amount:
             await update.message.reply_text("❌ موجودی شما کافی نیست!")
         else:
@@ -350,7 +382,7 @@ async def process_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text("✅ انتقال با موفقیت انجام شد.")
             await context.bot.send_message(chat_id=target_id, text=f"🎉 تعداد {amount} {t_type} از طرف کاربر `{sender_id}` به حساب شما واریز شد.")
         conn.close()
-    except Exception as e:
+    except Exception:
         await update.message.reply_text("❌ خطایی رخ داد. آیدی یا مقدار وارد شده معتبر نیست.")
     return ConversationHandler.END
 
@@ -359,6 +391,33 @@ def main():
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # گفتگوی ثبت سفارش ممبر
+    member_order_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_member_order, pattern="^m_")],
+        states={
+            WAIT_MEMBER_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_member_link)],
+            WAIT_MEMBER_CONFIRM: [
+                CallbackQueryHandler(confirm_member_order, pattern="^confirm_member_order$"),
+                CallbackQueryHandler(cancel_order, pattern="^cancel_order$")
+            ]
+        },
+        fallbacks=[CallbackQueryHandler(cancel_order, pattern="^cancel_order$")]
+    )
+
+    # گفتگوی ثبت سفارش ویو
+    view_order_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_view_order, pattern="^v_")],
+        states={
+            WAIT_VIEW_POST: [MessageHandler(filters.ALL & ~filters.COMMAND, receive_view_post)],
+            WAIT_VIEW_CONFIRM: [
+                CallbackQueryHandler(confirm_view_order, pattern="^confirm_view_order$"),
+                CallbackQueryHandler(cancel_order, pattern="^cancel_order$")
+            ]
+        },
+        fallbacks=[CallbackQueryHandler(cancel_order, pattern="^cancel_order$")]
+    )
+
+    # گفتگوی انتقال سکه و الماس
     transfer_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^(💰 انتقال سکه|💎︎  انتقال الماس)$"), start_transfer)],
         states={
@@ -369,9 +428,10 @@ def main():
     )
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(member_order_conv)
+    application.add_handler(view_order_conv)
     application.add_handler(transfer_conv)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
-    application.add_handler(CallbackQueryHandler(handle_callback))
 
     logging.info("ربات با موفقیت روشن شد...")
     application.run_polling(drop_pending_updates=True)
