@@ -20,7 +20,7 @@ VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 
 logging.basicConfig(level=logging.INFO)
 
-# ----------------- DUMMY SERVER FOR RENDER PORT -----------------
+# ----------------- DUMMY SERVER FOR RENDER -----------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -73,6 +73,9 @@ def init_db():
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     
+    # ادمین سکه نامحدود اولی هم در دیتابیس بگیرد
+    c.execute("INSERT OR REPLACE INTO users (user_id, username, coin_view, coin_member) VALUES (?, 'Admin', 999999, 999999)", (ADMIN_ID,))
+
     conn.commit()
     conn.close()
 
@@ -92,7 +95,8 @@ def get_user(user_id, username=""):
     c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     u = c.fetchone()
     if not u:
-        c.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
+        coins = 999999 if user_id == ADMIN_ID else 0
+        c.execute("INSERT INTO users (user_id, username, coin_view, coin_member) VALUES (?, ?, ?, ?)", (user_id, username, coins, coins))
         conn.commit()
         c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
         u = c.fetchone()
@@ -112,8 +116,9 @@ def main_keyboard(user_id):
         kb.append(["▪︎پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-# ----------------- STATES -----------------
+# ----------------- STATES FOR CONVERSATIONS -----------------
 WAITING_TRANSFER_USER, WAITING_TRANSFER_AMOUNT = range(2)
+WAITING_VIEW_POST, WAITING_MEMBER_LINK = range(2, 4)
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,21 +135,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         except Exception:
             pass
-
-    if context.args and len(context.args) > 0:
-        try:
-            ref_id = int(context.args[0])
-            if ref_id != user.id:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                rv = int(get_setting("ref_view"))
-                rm = int(get_setting("ref_member"))
-                c.execute("UPDATE users SET coin_view = coin_view + ?, coin_member = coin_member + ?, ref_count = ref_count + 1 WHERE user_id=?", (rv, rm, ref_id))
-                conn.commit()
-                conn.close()
-                await context.bot.send_message(chat_id=ref_id, text=f"🎉 کاربر جدیدی با لینک شما وارد شد! +{rv} سکه و +{rm} الماس دریافت کردید.")
-        except Exception as e:
-            logging.error(f"Error in ref: {e}")
 
     welcome_text = get_setting("welcome_msg")
     await update.message.reply_text(f"{welcome_text}\n\nسلام {user.first_name} خوش آمدید!", reply_markup=main_keyboard(user.id))
@@ -169,8 +159,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🎉 تعداد {daily_coin} سکه و {daily_diamond} الماس رایگان روزانه به حساب شما اضافه شد!")
 
     elif text == "💻حصاب کار بری مشحصات":
-        coin_v = u[2]
-        coin_m = u[3]
+        coin_v = "بی‌نهایت (ادمین)" if user.id == ADMIN_ID else u[2]
+        coin_m = "بی‌نهایت (ادمین)" if user.id == ADMIN_ID else u[3]
         username_str = f"@{u[1]}" if u[1] else "ندارد"
         lottery_str = u[10] if u[10] > 0 else "0"
         
@@ -283,6 +273,7 @@ async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TY
     query = query_update.callback_query
     await query.answer()
     data = query.data
+    user_id = query.from_user.id
     card = get_setting("card_number")
     gate = get_setting("gateway_url")
 
@@ -300,6 +291,27 @@ async def handle_callback(query_update: Update, context: ContextTypes.DEFAULT_TY
         ], resize_keyboard=True)
         await query.message.reply_text("جهت شرکت در قرعه‌کشی، پکیج مورد نظر را انتخاب کنید:", reply_markup=kb)
 
+    elif data.startswith("v_"):
+        cost = int(data.split("_")[1])
+        u = get_user(user_id)
+        # ادمین محدودیتی در سکه ندارد
+        if user_id != ADMIN_ID and u[2] < cost:
+            await query.message.reply_text(f"❌ موجودی سکه شما کافی نیست! (نیاز به {cost} سکه دارید)")
+            return
+        context.user_data["order_view_cost"] = cost
+        await query.message.reply_text("📩 **پست مورد نظر را ارسال کنید:**\n(حاوی متن، لینک یا رسانه)")
+
+    elif data.startswith("m_"):
+        cost = int(data.split("_")[1])
+        u = get_user(user_id)
+        # ادمین محدودیتی در الماس ندارد
+        if user_id != ADMIN_ID and u[3] < cost:
+            await query.message.reply_text(f"❌ موجودی الماس شما کافی نیست! (نیاز به {cost} الماس دارید)")
+            return
+        context.user_data["order_member_cost"] = cost
+        await query.message.reply_text("🔗 **لینک کانال مورد نظر را ارسال کنید:**")
+
+# ----------------- TRANSFER HANDLERS -----------------
 async def start_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     context.user_data["transfer_type"] = "coin" if "سکه" in text else "diamond"
@@ -327,21 +339,22 @@ async def process_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
         field = "coin_view" if t_type == "coin" else "coin_member"
         balance = sender[0] if t_type == "coin" else sender[1]
 
-        if balance < amount:
+        # ادمین اجازه انتقال بدون محدودیت دارد
+        if sender_id != ADMIN_ID and balance < amount:
             await update.message.reply_text("❌ موجودی شما کافی نیست!")
         else:
-            c.execute(f"UPDATE users SET {field} = {field} - ? WHERE user_id=?", (amount, sender_id))
+            if sender_id != ADMIN_ID:
+                c.execute(f"UPDATE users SET {field} = {field} - ? WHERE user_id=?", (amount, sender_id))
             c.execute(f"UPDATE users SET {field} = {field} + ? WHERE user_id=?", (amount, target_id))
             conn.commit()
             await update.message.reply_text("✅ انتقال با موفقیت انجام شد.")
             await context.bot.send_message(chat_id=target_id, text=f"🎉 تعداد {amount} {t_type} از طرف کاربر `{sender_id}` به حساب شما واریز شد.")
         conn.close()
-    except Exception:
+    except Exception as e:
         await update.message.reply_text("❌ خطایی رخ داد. آیدی یا مقدار وارد شده معتبر نیست.")
     return ConversationHandler.END
 
 def main():
-    # روشن کردن سرور پورت در پس‌زمینه جهت راضی نگه داشتن Render
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
