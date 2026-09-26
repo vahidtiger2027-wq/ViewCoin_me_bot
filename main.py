@@ -1,4 +1,4 @@
-   import os
+import os
 import sqlite3
 import datetime
 import logging
@@ -125,4 +125,4 @@ def main():
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()  
+    main()
