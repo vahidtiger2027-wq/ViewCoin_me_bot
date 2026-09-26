@@ -1,127 +1,141 @@
 import os
-import telebot
-from telebot import types
-from flask import Flask, request
+import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from database import init_db
+from flask import Flask, request
+import telebot
+from telebot import types
 
-TOKEN = os.environ.get('BOT_TOKEN')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
+# تنظیمات لوگ‌ها
+logging.basicConfig(level=logging.INFO)
 
-bot = telebot.TeleBot(TOKEN)
+# دریافت متغیرهای محیطی از Render
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+DATABASE_URL = os.environ.get('DATABASE_URL')
+ADMIN_ID = os.environ.get('ADMIN_ID')
+
+if ADMIN_ID:
+    try:
+        ADMIN_ID = int(ADMIN_ID)
+    except ValueError:
+        ADMIN_ID = None
+
+bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# ساخت جداول دیتابیس در صورت عدم وجود
+# اتصال به دیتابیس PostgreSQL
+def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+    return conn
+
+# ساخت جداول دیتابیس
+def init_db():
+    if not DATABASE_URL:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            coins INT DEFAULT 0,
+            gems INT DEFAULT 0,
+            invites INT DEFAULT 0
+        );
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
+
 try:
     init_db()
 except Exception as e:
-    print(f"Database Init Error: {e}")
+    logging.error(f"Error initializing DB: {e}")
 
-def get_db_connection():
-    return psycopg2.connect(os.environ.get('DATABASE_URL'), sslmode='require')
-
-def get_setting(key):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT value FROM settings WHERE key = %s;", (key,))
-    res = cur.fetchone()
-    cur.close()
-    conn.close()
-    return res[0] if res else ""
-
+# دریافت یا ساخت اطلاعات کاربر در دیتابیس
 def get_user(user_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("SELECT * FROM users WHERE user_id = %s;", (user_id,))
     user = cur.fetchone()
+    if not user:
+        cur.execute("INSERT INTO users (user_id, coins, gems, invites) VALUES (%s, 0, 0, 0) RETURNING *;", (user_id,))
+        user = cur.fetchone()
+        conn.commit()
     cur.close()
     conn.close()
     return user
 
-def main_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        types.KeyboardButton("💎 جمع آوری سکه رایگان"),
-        types.KeyboardButton("💻 حساب کاربری"),
-        types.KeyboardButton("👥 جذب زیر مجموعه"),
-        types.KeyboardButton("📥 ثبت تبلیغ ویو گیر و ممبر گیر"),
-        types.KeyboardButton("👨‍💻🛍 فروشگاه"),
-        types.KeyboardButton("💰 انتقال سکه"),
-        types.KeyboardButton("💎 انتقال الماس"),
-        types.KeyboardButton("🎲 قرعه کشی")
-    )
-    return markup
+# منوی اصلی ربات
+def main_keyboard(user_id):
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    btn_profile = types.KeyboardButton("👤 حساب کاربری")
+    btn_earn = types.KeyboardButton("💎 جمع آوری سکه رایگان")
+    btn_order = types.KeyboardButton("🐳 ثبت تبلیغ ویو گیر و ممبر گیر")
+    btn_sub = types.KeyboardButton("👥 جذب زیر مجموعه")
+    btn_shop = types.KeyboardButton("🏪 فروشگاه")
+    btn_transfer_coin = types.KeyboardButton("💰 انتقال سکه")
+    btn_transfer_gem = types.KeyboardButton("💎 انتقال الماس")
+    btn_lottery = types.KeyboardButton("🎲 قرعه کشی")
 
-def admin_keyboard():
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("⚙️ تنظیم سفارشات ویو", callback_data="adm_view_order"),
-        types.InlineKeyboardButton("⚙️ تنظیم سفارش ممبر", callback_data="adm_member_order"),
-        types.InlineKeyboardButton("💳 تنظیم شماره کارت", callback_data="adm_card"),
-        types.InlineKeyboardButton("🌐 تنظیم درگاه پرداخت", callback_data="adm_gateway"),
-        types.InlineKeyboardButton("🎁 تنظیم سکه و الماس روزانه", callback_data="adm_daily"),
-        types.InlineKeyboardButton("👥 تنظیم سکه زیرمجموعه", callback_data="adm_ref"),
-        types.InlineKeyboardButton("🔒 تنظیم اسپانسر جوین اجباری", callback_data="adm_sponsor"),
-        types.InlineKeyboardButton("⏳ تنظیم ماندگاری و جریمه لفت", callback_data="adm_penalty"),
-        types.InlineKeyboardButton("📊 آمار کاربران", callback_data="adm_stats")
-    )
+    markup.add(btn_profile, btn_earn)
+    markup.add(btn_order, btn_sub)
+    markup.add(btn_shop, btn_transfer_coin)
+    markup.add(btn_transfer_gem, btn_lottery)
+
+    # نمایش دکمه مدیریت فقط برای ادمین
+    if ADMIN_ID and user_id == ADMIN_ID:
+        btn_admin = types.KeyboardButton("⚙️ پنل مدیریت")
+        markup.add(btn_admin)
+
     return markup
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    user_id = message.chat.id
-    username = message.from_user.username or "بدون آیدی"
-    
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO users (user_id, username) 
-        VALUES (%s, %s) 
-        ON CONFLICT (user_id) DO UPDATE SET username = %s;
-    """, (user_id, username, username))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    welcome_text = get_setting('welcome_msg')
-    bot.send_message(user_id, f"{welcome_text}\n\nبه منوی اصلی خوش آمدید:", reply_markup=main_keyboard())
-
-@bot.message_handler(commands=['admin'])
-def admin_panel(message):
-    if message.chat.id == ADMIN_ID:
-        bot.send_message(message.chat.id, "🛠 **به پنل مدیریت خوش آمدید:**", reply_markup=admin_keyboard(), parse_mode="Markdown")
-
-@bot.message_handler(func=lambda m: m.text == "💻 حساب کاربری")
-def user_account(message):
-    u = get_user(message.chat.id)
-    if not u:
-        return
-    
-    msg = f"💻 **مشخصات حساب کاربری شما:**\n\n"
-    msg += f"👤 نام کاربری: @{u['username']}\n" if u['username'] != "بدون آیدی" else "👤 نام کاربری: ندارد\n"
-    msg += f"🆔 آیدی عددی: `{u['user_id']}`\n"
-    msg += f"🎁 هدیه مدیریت: {u['gifts_received']}\n"
-    msg += f"👁 بازدیدهای شما: {u['total_views']}\n"
-    msg += f"👁 بازدیدهای امروز: {u['today_views']}\n"
-    msg += f"🏆 جوایز قرعه‌کشی: {u['lottery_wins']}\n"
-    msg += f"👥 تعداد زیرمجموعه‌ها: {u['referrals_count']}\n"
-    msg += f"💰 موجودی سکه: {u['coins']}\n"
-    msg += f"💎 موجودی الماس: {u['diamonds']}\n"
-    
-    bot.send_message(message.chat.id, msg, parse_mode="Markdown")
-
-@bot.message_handler(func=lambda m: m.text == "📥 ثبت تبلیغ ویو گیر و ممبر گیر")
-def order_menu(message):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("👁 ثبت تبلیغ ویوگیر", callback_data="order_view_menu"),
-        types.InlineKeyboardButton("👥 ثبت تبلیغ ممبر گیر", callback_data="order_member_menu")
+    user_id = message.from_user.id
+    get_user(user_id)
+    bot.send_message(
+        message.chat.id,
+        "سلام! به ربات ممبرگیر و ویوگیر خوش آمدید.\nلطفاً از گزینه‌های زیر استفاده کنید:",
+        reply_markup=main_keyboard(user_id)
     )
-    bot.send_message(message.chat.id, "لطفاً نوع سفارش خود را انتخاب کنید:", reply_markup=markup)
 
-@app.route('/' + TOKEN, methods=['POST'])
+@bot.message_handler(func=lambda message: True)
+def handle_messages(message):
+    user_id = message.from_user.id
+    text = message.text
+
+    if text == "👤 حساب کاربری":
+        user = get_user(user_id)
+        msg = (
+            f"👤 **حساب کاربری**\n\n"
+            f"🆔 شناسه: `{user['user_id']}`\n"
+            f"💰 موجودی سکه: {user['coins']}\n"
+            f"💎 موجودی الماس: {user['gems']}\n"
+            f"👥 تعداد زیرمجموعه‌ها: {user['invites']}"
+        )
+        bot.send_message(message.chat.id, msg, parse_mode="Markdown")
+
+    elif text == "💎 جمع آوری سکه رایگان":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("👁 دیدن پست و دریافت سکه", callback_data="get_coin_view"))
+        bot.send_message(message.chat.id, "جهت دریافت سکه رایگان یکی از روش‌های زیر را انتخاب کنید:", reply_markup=markup)
+
+    elif text == "🐳 ثبت تبلیغ ویو گیر و ممبر گیر":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("👁 ثبت تبلیغ ویوگیر", callback_data="order_view"),
+            types.InlineKeyboardButton("👥 ثبت تبلیغ ممبرگیر", callback_data="order_member")
+        )
+        bot.send_message(message.chat.id, "لطفاً نوع سفارش خود را انتخاب کنید:", reply_markup=markup)
+
+    elif text == "⚙️ پنل مدیریت" and user_id == ADMIN_ID:
+        bot.send_message(message.chat.id, "⚙️ **به پنل مدیریت خوش آمدید!**\nامکانات مدیریتی آماده استفاده است.")
+
+    else:
+        bot.send_message(message.chat.id, "دستور انتخاب‌شده پردازش شد.", reply_markup=main_keyboard(user_id))
+
+# مسیر دریافت وب‌هوک
+@app.route('/' + BOT_TOKEN, methods=['POST'])
 def getMessage():
     json_string = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_string)
@@ -131,8 +145,8 @@ def getMessage():
 @app.route("/")
 def webhook():
     bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL + '/' + TOKEN)
-    return "Bot is running online!", 200
+    bot.set_webhook(url='https://' + request.host + '/' + BOT_TOKEN)
+    return "Webhook set successfully!", 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 5000)))
