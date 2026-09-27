@@ -18,6 +18,10 @@ ADMIN_ID = 5412332176  # آیدی ادمین اصلی
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 
+# تنظیمات درگاه و کارت (قابل تغییر در کانفیگ یا تنظیمات)
+CARD_NUMBER = os.environ.get("CARD_NUMBER", "تنظیم نشده (جهت تنظیم به مدیریت مراجعه کنید)")
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "https://t.me/Admin_ID")
+
 logging.basicConfig(level=logging.INFO)
 
 # ----------------- HEALTH CHECK SERVER -----------------
@@ -55,7 +59,6 @@ def init_db():
         referrer_id INTEGER DEFAULT 0
     )''')
     
-    # جدول ثبت کلیک‌های یکتای کاربران روی هر پست یا لینک
     c.execute('''CREATE TABLE IF NOT EXISTS user_clicks (
         user_id INTEGER,
         target_id TEXT,
@@ -117,9 +120,17 @@ def ads_keyboard():
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
+def shop_keyboard():
+    kb = [
+        ["👁خرید سکه ویوگیر", "👁خرید الماس ممبر گیر"],
+        ["بازگشت به منوی اصلی"]
+    ]
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
+
 # ----------------- CONVERSATION STATES -----------------
 WAIT_VIEW_POST, WAIT_VIEW_CONFIRM = range(2)
 WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = range(2, 4)
+WAIT_RECEIPT_PHOTO = range(4, 5)
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,7 +143,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_or_create_user(user.id, user.username or "", referrer_id)
     await update.message.reply_text(f"سلام {user.first_name} عزیز، به ربات خوش آمدید!", reply_markup=main_keyboard())
 
-# دستور مخصوص ادمین برای افزایش سکه بی‌نهایت خودتان (/add_admin_coin 10000 10000)
 async def add_admin_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -222,13 +232,166 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await update.message.reply_text("تعداد ممبر مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
+    # ----------------- SHOP HANDLERS -----------------
+    elif text == "👨‍💻🛍︎فروشگاه":
+        await update.message.reply_text("به فروشگاه خوش آمدید! بخش مورد نظر را انتخاب کنید:", reply_markup=shop_keyboard())
+
+    elif text == "👁خرید سکه ویوگیر":
+        ikb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("20.000 سکه ⚡️ 50.000 تومان", callback_data="buy_coin_20000_50000")],
+            [InlineKeyboardButton("40.000 سکه ⚡️ 100.000 تومان", callback_data="buy_coin_40000_100000")],
+            [InlineKeyboardButton("50.000 سکه ⚡️ 150.000 تومان", callback_data="buy_coin_50000_150000")],
+            [InlineKeyboardButton("200.000 سکه ⚡️ 200.000 تومان", callback_data="buy_coin_200000_200000")]
+        ])
+        await update.message.reply_text("🛍 **پک‌های سکه ویوگیر:**\nلطفاً یکی از بسته‌های زیر را انتخاب کنید:", reply_markup=ikb)
+
+    elif text == "👁خرید الماس ممبر گیر":
+        ikb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("100 الماس 💎 25.000 تومان", callback_data="buy_diamond_100_25000")],
+            [InlineKeyboardButton("250 الماس 💎 50.000 تومان", callback_data="buy_diamond_250_50000")],
+            [InlineKeyboardButton("500 الماس 💎 100.000 تومان", callback_data="buy_diamond_500_100000")],
+            [InlineKeyboardButton("1000 الماس 💎 200.000 تومان", callback_data="buy_diamond_1000_200000")],
+            [InlineKeyboardButton("4000 الماس 💎 800.000 تومان", callback_data="buy_diamond_4000_800000")]
+        ])
+        await update.message.reply_text("🛍 **پک‌های الماس ممبرگیر:**\nلطفاً یکی از بسته‌های زیر را انتخاب کنید:", reply_markup=ikb)
+
     elif text == "بازگشت به منوی اصلی":
         await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard())
 
     else:
         await update.message.reply_text("این بخش در حال حاضر در حال تنظیم است.", reply_markup=main_keyboard())
 
-# ----------------- VIEW ADS FLOW -----------------
+# ----------------- SHOP PAYMENT FLOW -----------------
+async def select_buy_package(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data.split("_")
+    
+    item_type = data[1] # coin or diamond
+    amount = int(data[2])
+    price = int(data[3])
+
+    context.user_data["buy_type"] = item_type
+    context.user_data["buy_amount"] = amount
+    context.user_data["buy_price"] = price
+
+    unit_name = "سکه ویو" if item_type == "coin" else "الماس ممبر"
+
+    ikb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 پرداخت کارت به کارت", callback_data="pay_card")],
+        [InlineKeyboardButton("🔗 پرداخت از طریق درگاه", url=GATEWAY_URL)]
+    ])
+
+    await query.message.reply_text(
+        f"🛒 **سفارش شما:** {amount:,} {unit_name}\n"
+        f"💵 **مبلغ قابل پرداخت:** {price:,} تومان\n\n"
+        f"لطفاً روش پرداخت مورد نظر خود را انتخاب کنید:",
+        reply_markup=ikb,
+        parse_mode="Markdown"
+    )
+
+async def pay_card_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    amount = context.user_data.get("buy_amount")
+    price = context.user_data.get("buy_price")
+    item_type = context.user_data.get("buy_type")
+    unit_name = "سکه ویو" if item_type == "coin" else "الماس ممبر"
+
+    msg = f"""💳 **اطلاعات واریز کارت به کارت:**
+
+📌 **شماره کارت:**
+`{CARD_NUMBER}`
+
+💵 **مبلغ:** {price:,} تومان
+📦 **سفارش:** {amount:,} {unit_name}
+
+⚠️ **توجه:** بعد از واریزی، **عکس تراکنش (فیش واریزی)** را همین حالا به ربات بفرستید."""
+
+    await query.message.reply_text(msg, parse_mode="Markdown")
+    return WAIT_RECEIPT_PHOTO
+
+async def receive_receipt_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    user = update.effective_user
+    amount = context.user_data.get("buy_amount")
+    price = context.user_data.get("buy_price")
+    item_type = context.user_data.get("buy_type")
+    unit_name = "سکه ویو" if item_type == "coin" else "الماس ممبر"
+
+    await update.message.reply_text("✅ فیش شما دریافت شد و برای مدیریت ارسال گردید.\nپس از بررسی و تایید، حساب شما شارژ خواهد شد.")
+
+    # ارسال عکس فیش برای ادمین جهت تایید
+    admin_kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تایید و شارژ", callback_data=f"approve_{user.id}_{item_type}_{amount}"),
+            InlineKeyboardButton("❌ رد درخواست", callback_data=f"reject_{user.id}")
+        ]
+    ])
+
+    admin_msg = f"""📥 **رسید واریزی جدید**
+
+👤 کاربر: {user.first_name} (@{user.username or 'بدون آیدی'})
+🆔 آیدی: `{user.id}`
+📦 بسته: {amount:,} {unit_name}
+💵 مبلغ: {price:,} تومان"""
+
+    await context.bot.send_photo(
+        chat_id=ADMIN_ID,
+        photo=photo.file_id,
+        caption=admin_msg,
+        reply_markup=admin_kb,
+        parse_mode="Markdown"
+    )
+
+    return ConversationHandler.END
+
+async def admin_payment_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data.split("_")
+    action = data[0]
+
+    if action == "approve":
+        target_user_id = int(data[1])
+        item_type = data[2]
+        amount = int(data[3])
+
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        if item_type == "coin":
+            c.execute("UPDATE users SET coin_view = coin_view + ? WHERE user_id=?", (amount, target_user_id))
+            unit_name = "سکه ویو"
+        else:
+            c.execute("UPDATE users SET coin_member = coin_member + ? WHERE user_id=?", (amount, target_user_id))
+            unit_name = "الماس ممبر"
+        conn.commit()
+        conn.close()
+
+        await query.message.edit_caption(caption=query.message.caption + "\n\n✅ **تایید شد و حساب کاربر شارژ گردید.**", parse_mode="Markdown")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"🎉 **پرداخت شما تایید شد!**\nتعداد {amount:,} {unit_name} به حساب شما اضافه شد."
+            )
+        except:
+            pass
+
+    elif action == "reject":
+        target_user_id = int(data[1])
+        await query.message.edit_caption(caption=query.message.caption + "\n\n❌ **درخواست لغو/رد شد.**", parse_mode="Markdown")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text="❌ فیش واریزی شما توسط مدیریت تایید نشد."
+            )
+        except:
+            pass
+
+# ----------------- VIEW & MEMBER ADS CONVERSATIONS -----------------
 async def start_view_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -297,7 +460,6 @@ async def confirm_view_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-# ----------------- MEMBER ADS FLOW -----------------
 async def start_member_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -380,7 +542,7 @@ async def cancel_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.edit_text("❌ ثبت سفارش لغو شد.")
     return ConversationHandler.END
 
-# ----------------- BUTTON CALLBACKS (IN CHANNELS) -----------------
+# ----------------- BUTTON CALLBACKS -----------------
 async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -389,7 +551,6 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
 
-    # ثبت بازدید
     if data.startswith("do_view_"):
         target_id = data.replace("do_view_", "")
         c.execute("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, target_id))
@@ -404,7 +565,6 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
         conn.close()
         await query.answer("🎉 ۱ سکه ویو به حساب شما اضافه شد!", show_alert=True)
 
-    # توربو
     elif data.startswith("do_turbo_"):
         target_id = data.replace("do_turbo_", "")
         c.execute("INSERT OR IGNORE INTO post_views (post_id, view_count) VALUES (?, 0)", (target_id,))
@@ -431,20 +591,17 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
             conn.close()
             await query.answer(f"📊 این پست تاکنون {views} بازدید داشته است.\nپاداش توربو از ۴۰ بازدید به بالا شروع می‌شود!", show_alert=True)
 
-    # دریافت الماس
     elif data.startswith("get_diamond_"):
         target_info = data.replace("get_diamond_", "").split("_")
         target_id = target_info[1]
         channel_username = target_info[2] if len(target_info) > 2 else None
 
-        # چک کردن دریافت تکراری
         c.execute("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, f"m_{target_id}"))
         if c.fetchone():
             conn.close()
             await query.answer("❌ شما قبلاً برای این پست الماس دریافت کرده‌اید!", show_alert=True)
             return
 
-        # بررسی عضویت کاربر در کانال (در صورت آیدی عمومی)
         if channel_username:
             try:
                 member = await context.bot.get_chat_member(chat_id=f"@{channel_username}", user_id=user_id)
@@ -490,14 +647,28 @@ def main():
         fallbacks=[CallbackQueryHandler(cancel_ads, pattern="^cancel_ads$")]
     )
 
+    receipt_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(pay_card_handler, pattern="^pay_card$")],
+        states={
+            WAIT_RECEIPT_PHOTO: [MessageHandler(filters.PHOTO, receive_receipt_photo)]
+        },
+        fallbacks=[]
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add_admin_coin", add_admin_coin))
     app.add_handler(view_conv)
     app.add_handler(member_conv)
+    app.add_handler(receipt_conv)
+    
+    # Callback Handlers
+    app.add_handler(CallbackQueryHandler(select_buy_package, pattern="^buy_"))
+    app.add_handler(CallbackQueryHandler(admin_payment_decision, pattern="^(approve_|reject_)"))
     app.add_handler(CallbackQueryHandler(handle_channel_callbacks, pattern="^(do_view_|do_turbo_|get_diamond_)"))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
-    logging.info("Starting bot...")
+    logging.INFO("Starting bot...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
