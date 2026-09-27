@@ -18,7 +18,6 @@ ADMIN_ID = 5412332176  # آیدی ادمین اصلی
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 
-# تنظیمات درگاه و کارت (قابل تغییر در کانفیگ یا تنظیمات)
 CARD_NUMBER = os.environ.get("CARD_NUMBER", "تنظیم نشده (جهت تنظیم به مدیریت مراجعه کنید)")
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "https://t.me/Admin_ID")
 
@@ -128,9 +127,9 @@ def shop_keyboard():
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 # ----------------- CONVERSATION STATES -----------------
-WAIT_VIEW_POST, WAIT_VIEW_CONFIRM = range(2)
-WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = range(2, 4)
-WAIT_RECEIPT_PHOTO = range(4, 5)
+WAIT_VIEW_POST, WAIT_VIEW_CONFIRM = 1, 2
+WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = 3, 4
+WAIT_RECEIPT_PHOTO = 5
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,7 +231,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await update.message.reply_text("تعداد ممبر مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
-    # ----------------- SHOP HANDLERS -----------------
     elif text == "👨‍💻🛍︎فروشگاه":
         await update.message.reply_text("به فروشگاه خوش آمدید! بخش مورد نظر را انتخاب کنید:", reply_markup=shop_keyboard())
 
@@ -267,7 +265,7 @@ async def select_buy_package(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     data = query.data.split("_")
     
-    item_type = data[1] # coin or diamond
+    item_type = data[1]
     amount = int(data[2])
     price = int(data[3])
 
@@ -322,7 +320,6 @@ async def receive_receipt_photo(update: Update, context: ContextTypes.DEFAULT_TY
 
     await update.message.reply_text("✅ فیش شما دریافت شد و برای مدیریت ارسال گردید.\nپس از بررسی و تایید، حساب شما شارژ خواهد شد.")
 
-    # ارسال عکس فیش برای ادمین جهت تایید
     admin_kb = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ تایید و شارژ", callback_data=f"approve_{user.id}_{item_type}_{amount}"),
@@ -539,7 +536,7 @@ async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cancel_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.edit_text("❌ ثبت سفارش لغو شد.")
+    await query.message.edit_text("❌ عملیات لغو شد.")
     return ConversationHandler.END
 
 # ----------------- BUTTON CALLBACKS -----------------
@@ -652,7 +649,7 @@ def main():
         states={
             WAIT_RECEIPT_PHOTO: [MessageHandler(filters.PHOTO, receive_receipt_photo)]
         },
-        fallbacks=[]
+        fallbacks=[CommandHandler("start", start)]
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -668,7 +665,7 @@ def main():
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
-    logging.INFO("Starting bot...")
+    logging.info("Starting bot...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
