@@ -13,14 +13,14 @@ from telegram.ext import (
 # ----------------- CONFIGURATION -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 PORT = int(os.environ.get("PORT", 10000))
+ADMIN_ID = 5412332176  # آیدی ادمین اصلی
 
-# آیدی یا یوزرنیم کانال‌های ویوگیر و ممبرگیر
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 
 logging.basicConfig(level=logging.INFO)
 
-# ----------------- HEALTH CHECK SERVER FOR RENDER -----------------
+# ----------------- HEALTH CHECK SERVER -----------------
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -55,7 +55,13 @@ def init_db():
         referrer_id INTEGER DEFAULT 0
     )''')
     
-    # جدول ذخیره آمار بازدید پست‌ها برای دکمه توربو و بازدید
+    # جدول ثبت کلیک‌های یکتای کاربران روی هر پست یا لینک
+    c.execute('''CREATE TABLE IF NOT EXISTS user_clicks (
+        user_id INTEGER,
+        target_id TEXT,
+        PRIMARY KEY (user_id, target_id)
+    )''')
+    
     c.execute('''CREATE TABLE IF NOT EXISTS post_views (
         post_id TEXT PRIMARY KEY,
         view_count INTEGER DEFAULT 0
@@ -126,12 +132,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_or_create_user(user.id, user.username or "", referrer_id)
     await update.message.reply_text(f"سلام {user.first_name} عزیز، به ربات خوش آمدید!", reply_markup=main_keyboard())
 
+# دستور مخصوص ادمین برای افزایش سکه بی‌نهایت خودتان (/add_admin_coin 10000 10000)
+async def add_admin_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    try:
+        coins = int(context.args[0])
+        diamonds = int(context.args[1])
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("UPDATE users SET coin_view = coin_view + ?, coin_member = coin_member + ? WHERE user_id=?", (coins, diamonds, ADMIN_ID))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ با موفقیت {coins} سکه و {diamonds} الماس به حساب ادمین اضافه شد.")
+    except:
+        await update.message.reply_text("فرمت صحیح:\n`/add_admin_coin 1000 1000`", parse_mode="Markdown")
+
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user = update.effective_user
     u = get_or_create_user(user.id, user.username or "")
 
-    # ۱. جم آوری سکه رایگان روزانه
     if text == "💎جم اوری سکه رایگان":
         today_str = str(datetime.date.today())
         last_daily = u[5]
@@ -150,7 +171,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.close()
             await update.message.reply_text("🎉 ۲۰ **سکه ویو** و ۲۰ **الماس ممبر** رایگان به حساب شما اضافه شد!", parse_mode="Markdown")
 
-    # ۲. حساب کاربری
     elif text == "💻حصاب کار بری مشحصات":
         username_line = f"👤 **یوزرنیم:** @{u[1]}\n" if u[1] else ""
         
@@ -170,7 +190,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💎 **موجودی الماس شما:** {u[3]}"""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
-    # ۳. جذب زیرمجموعه
     elif text == "👥جذب زیر مجموعه":
         bot_username = (await context.bot.get_me()).username
         ref_link = f"https://t.me/{bot_username}?start={user.id}"
@@ -185,7 +204,6 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 لینک بالا را برای دوستان خود بفرستید تا با ورود آن‌ها سکه و الماس رایگان بگیرید."""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
-    # ۴. منوی ثبت تبلیغ ویو گیر و ممبر گیر
     elif text == "📥ثبت تبلیغ ویو گیر و ممبر گیر":
         await update.message.reply_text("لطفاً نوع تبلیغ مورد نظر خود را انتخاب کنید:", reply_markup=ads_keyboard())
 
@@ -219,7 +237,7 @@ async def start_view_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     
     u = get_or_create_user(user_id)
-    if u[2] < cost:
+    if u[2] < cost and user_id != ADMIN_ID:
         await query.message.reply_text(f"❌ موجودی سکه ویو شما کافی نیست! شما به {cost} سکه نیاز دارید.")
         return ConversationHandler.END
 
@@ -247,7 +265,6 @@ async def confirm_view_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = context.user_data.get("view_message")
     bot_username = (await context.bot.get_me()).username
 
-    # کسر سکه
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE users SET coin_view = coin_view - ? WHERE user_id=?", (cost, user_id))
@@ -255,16 +272,23 @@ async def confirm_view_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     bot_url = f"https://t.me/{bot_username}"
-    ikb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👁 ثبت بازدید", callback_data=f"do_view_{user_id}"), InlineKeyboardButton("🚀 توربو", callback_data=f"do_turbo_{user_id}")],
-        [InlineKeyboardButton("🤖 بازگشت به ربات", url=bot_url)]
-    ])
 
     try:
-        await context.bot.copy_message(
+        sent_msg = await context.bot.copy_message(
             chat_id=VIEW_CHANNEL,
             from_chat_id=msg.chat_id,
-            message_id=msg.message_id,
+            message_id=msg.message_id
+        )
+        
+        target_id = f"v_{sent_msg.message_id}"
+        ikb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👁 ثبت بازدید", callback_data=f"do_view_{target_id}"), InlineKeyboardButton("🚀 توربو", callback_data=f"do_turbo_{target_id}")],
+            [InlineKeyboardButton("🤖 بازگشت به ربات", url=bot_url)]
+        ])
+        
+        await context.bot.edit_message_reply_markup(
+            chat_id=VIEW_CHANNEL,
+            message_id=sent_msg.message_id,
             reply_markup=ikb
         )
         await query.message.edit_text("✅ پست شما با موفقیت ثبت شد و در کانال ویوگیر قرار گرفت.")
@@ -282,7 +306,7 @@ async def start_member_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     
     u = get_or_create_user(user_id)
-    if u[3] < cost:
+    if u[3] < cost and user_id != ADMIN_ID:
         await query.message.reply_text(f"❌ موجودی الماس شما کافی نیست! شما به {cost} الماس نیاز دارید.")
         return ConversationHandler.END
 
@@ -314,7 +338,6 @@ async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     link = context.user_data.get("member_link")
     bot_username = (await context.bot.get_me()).username
 
-    # کسر الماس
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("UPDATE users SET coin_member = coin_member - ? WHERE user_id=?", (cost, user_id))
@@ -324,17 +347,26 @@ async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     target_url = link if link.startswith("http") else f"https://t.me/{link.replace('@', '')}"
     bot_url = f"https://t.me/{bot_username}"
 
-    ikb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 جویین در کانال", url=target_url)],
-        [InlineKeyboardButton("💎 دریافت الماس", callback_data=f"get_diamond_{user_id}"), InlineKeyboardButton("🤖 بازگشت به ربات", url=bot_url)]
-    ])
-
     try:
-        await context.bot.send_message(
+        sent_msg = await context.bot.send_message(
             chat_id=MEMBER_CHANNEL,
             text=f"📢 **سفارش جدید ممبرگیر**\n\nعضو کانال زیر شوید و روی دریافت الماس کلیک کنید:\nتعداد مورد نیاز: {count} ممبر",
-            reply_markup=ikb,
             parse_mode="Markdown"
+        )
+        
+        channel_user_id = link.replace('@', '') if link.startswith('@') else None
+        callback_target = f"m_{sent_msg.message_id}_{channel_user_id}" if channel_user_id else f"m_{sent_msg.message_id}"
+
+        ikb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("عضویت", url=target_url)],
+            [InlineKeyboardButton("💎 دریافت الماس", callback_data=f"get_diamond_{callback_target}")],
+            [InlineKeyboardButton("سفارش ممبر", url=bot_url)]
+        ])
+
+        await context.bot.edit_message_reply_markup(
+            chat_id=MEMBER_CHANNEL,
+            message_id=sent_msg.message_id,
+            reply_markup=ikb
         )
         await query.message.edit_text("✅ لینک شما با موفقیت ثبت شد و در کانال ممبرگیر قرار گرفت.")
     except Exception as e:
@@ -354,23 +386,30 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
     data = query.data
     user_id = query.from_user.id
     
-    # دکمه ثبت بازدید
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+
+    # ثبت بازدید
     if data.startswith("do_view_"):
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
+        target_id = data.replace("do_view_", "")
+        c.execute("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, target_id))
+        if c.fetchone():
+            conn.close()
+            await query.answer("❌ شما قبلاً برای این پست بازدید ثبت کرده‌اید!", show_alert=True)
+            return
+
+        c.execute("INSERT INTO user_clicks (user_id, target_id) VALUES (?, ?)", (user_id, target_id))
         c.execute("UPDATE users SET coin_view = coin_view + 1, total_views = total_views + 1, today_views = today_views + 1 WHERE user_id=?", (user_id,))
         conn.commit()
         conn.close()
         await query.answer("🎉 ۱ سکه ویو به حساب شما اضافه شد!", show_alert=True)
 
-    # دکمه توربو
+    # توربو
     elif data.startswith("do_turbo_"):
-        post_key = f"{query.message.chat_id}_{query.message.message_id}"
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO post_views (post_id, view_count) VALUES (?, 0)", (post_key,))
-        c.execute("UPDATE post_views SET view_count = view_count + 1 WHERE post_id=?", (post_key,))
-        c.execute("SELECT view_count FROM post_views WHERE post_id=?", (post_key,))
+        target_id = data.replace("do_turbo_", "")
+        c.execute("INSERT OR IGNORE INTO post_views (post_id, view_count) VALUES (?, 0)", (target_id,))
+        c.execute("UPDATE post_views SET view_count = view_count + 1 WHERE post_id=?", (target_id,))
+        c.execute("SELECT view_count FROM post_views WHERE post_id=?", (target_id,))
         views = c.fetchone()[0]
 
         bonus = 0
@@ -390,12 +429,33 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
             await query.answer(f"🚀 این پست {views} بازدید داشته است! {bonus} سکه توربو دریافت کردید!", show_alert=True)
         else:
             conn.close()
-            await query.answer(f"📊 این پست تاکنون {views} بازدید داشته است.\nپاداش توربو از ۴0 بازدید به بالا شروع می‌شود!", show_alert=True)
+            await query.answer(f"📊 این پست تاکنون {views} بازدید داشته است.\nپاداش توربو از ۴۰ بازدید به بالا شروع می‌شود!", show_alert=True)
 
-    # دکمه دریافت الماس
+    # دریافت الماس
     elif data.startswith("get_diamond_"):
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
+        target_info = data.replace("get_diamond_", "").split("_")
+        target_id = target_info[1]
+        channel_username = target_info[2] if len(target_info) > 2 else None
+
+        # چک کردن دریافت تکراری
+        c.execute("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, f"m_{target_id}"))
+        if c.fetchone():
+            conn.close()
+            await query.answer("❌ شما قبلاً برای این پست الماس دریافت کرده‌اید!", show_alert=True)
+            return
+
+        # بررسی عضویت کاربر در کانال (در صورت آیدی عمومی)
+        if channel_username:
+            try:
+                member = await context.bot.get_chat_member(chat_id=f"@{channel_username}", user_id=user_id)
+                if member.status in ["left", "kicked"]:
+                    conn.close()
+                    await query.answer("❌ شما هنوز در کانال عضو نشده‌اید! ابتدا عضو شوید.", show_alert=True)
+                    return
+            except:
+                pass
+
+        c.execute("INSERT INTO user_clicks (user_id, target_id) VALUES (?, ?)", (user_id, f"m_{target_id}"))
         c.execute("UPDATE users SET coin_member = coin_member + 1 WHERE user_id=?", (user_id,))
         conn.commit()
         conn.close()
@@ -406,7 +466,6 @@ def main():
     
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # گفتگوی ثبت تبلیغ ویو
     view_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_view_ads, pattern="^v_")],
         states={
@@ -419,7 +478,6 @@ def main():
         fallbacks=[CallbackQueryHandler(cancel_ads, pattern="^cancel_ads$")]
     )
 
-    # گفتگوی ثبت تبلیغ ممبر
     member_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_member_ads, pattern="^m_")],
         states={
@@ -433,6 +491,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add_admin_coin", add_admin_coin))
     app.add_handler(view_conv)
     app.add_handler(member_conv)
     app.add_handler(CallbackQueryHandler(handle_channel_callbacks, pattern="^(do_view_|do_turbo_|get_diamond_)"))
