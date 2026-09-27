@@ -41,22 +41,44 @@ def init_db():
         coin_view INTEGER DEFAULT 0,
         coin_member INTEGER DEFAULT 0,
         ref_count INTEGER DEFAULT 0,
-        last_daily TEXT
+        last_daily TEXT,
+        admin_gift INTEGER DEFAULT 0,
+        total_views INTEGER DEFAULT 0,
+        today_views INTEGER DEFAULT 0,
+        lottery_wins INTEGER DEFAULT 0,
+        ref_commission INTEGER DEFAULT 0,
+        referrer_id INTEGER DEFAULT 0
     )''')
     conn.commit()
     conn.close()
 
 init_db()
 
-def get_or_create_user(user_id, username=""):
+def get_or_create_user(user_id, username="", referrer_id=0):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT user_id, username, coin_view, coin_member, ref_count, last_daily FROM users WHERE user_id=?", (user_id,))
+    c.execute("""SELECT user_id, username, coin_view, coin_member, ref_count, last_daily, 
+                        admin_gift, total_views, today_views, lottery_wins, ref_commission 
+                 FROM users WHERE user_id=?""", (user_id,))
     u = c.fetchone()
     if not u:
-        c.execute("INSERT INTO users (user_id, username, coin_view, coin_member, ref_count, last_daily) VALUES (?, ?, 0, 0, 0, '')", (user_id, username))
+        c.execute("""INSERT INTO users 
+            (user_id, username, coin_view, coin_member, ref_count, last_daily, admin_gift, total_views, today_views, lottery_wins, ref_commission, referrer_id) 
+            VALUES (?, ?, 0, 0, 0, '', 0, 0, 0, 0, 0, ?)""", (user_id, username, referrer_id))
         conn.commit()
-        c.execute("SELECT user_id, username, coin_view, coin_member, ref_count, last_daily FROM users WHERE user_id=?", (user_id,))
+        
+        # پاداش زیرمجموعه‌گیری به دعوت‌کننده
+        if referrer_id and referrer_id != user_id:
+            c.execute("""UPDATE users 
+                         SET coin_view = coin_view + 200, 
+                             coin_member = coin_member + 50, 
+                             ref_count = ref_count + 1 
+                         WHERE user_id=?""", (referrer_id,))
+            conn.commit()
+            
+        c.execute("""SELECT user_id, username, coin_view, coin_member, ref_count, last_daily, 
+                            admin_gift, total_views, today_views, lottery_wins, ref_commission 
+                     FROM users WHERE user_id=?""", (user_id,))
         u = c.fetchone()
     conn.close()
     return u
@@ -75,7 +97,12 @@ def main_keyboard():
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    get_or_create_user(user.id, user.username or "")
+    args = context.args
+    referrer_id = 0
+    if args and args[0].isdigit():
+        referrer_id = int(args[0])
+
+    get_or_create_user(user.id, user.username or "", referrer_id)
     await update.message.reply_text(f"سلام {user.first_name} عزیز، به ربات خوش آمدید!", reply_markup=main_keyboard())
 
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,36 +110,62 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     u = get_or_create_user(user.id, user.username or "")
 
-    # ۱. بخش جمع آوری سکه رایگان
+    # ۱. بخش جمع آوری سکه رایگان روزانه (۲۰ سکه + ۲۰ الماس)
     if text == "💎جم اوری سکه رایگان":
         today_str = str(datetime.date.today())
-        last_daily = u[5] # ستون last_daily
+        last_daily = u[5]
         
         if last_daily == today_str:
             await update.message.reply_text("❌ شما امروز سکه و الماس رایگان خود را دریافت کرده‌اید!\nلطفاً فردا مجدداً مراجعه کنید.")
         else:
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("UPDATE users SET coin_view = coin_view + 20, coin_member = coin_member + 20, last_daily = ? WHERE user_id=?", (today_str, user.id))
+            c.execute("""UPDATE users 
+                         SET coin_view = coin_view + 20, 
+                             coin_member = coin_member + 20, 
+                             last_daily = ? 
+                         WHERE user_id=?""", (today_str, user.id))
             conn.commit()
             conn.close()
-            await update.message.reply_text("🎉 ۲ **سکه ویو** و ۲۰ **الماس ممبر** رایگان به حساب شما اضافه شد!", parse_mode="Markdown")
+            await update.message.reply_text("🎉 ۲۰ **سکه ویو** و ۲۰ **الماس ممبر** رایگان به حساب شما اضافه شد!", parse_mode="Markdown")
 
     # ۲. بخش حساب کاربری
     elif text == "💻حصاب کار بری مشحصات":
-        username_str = f"@{u[1]}" if u[1] else "ثبت نشده"
+        username_line = f"👤 **یوزرنیم:** @{u[1]}\n" if u[1] else ""
+        
         msg = f"""💻 **مشخصات حساب کاربری شما:**
 
-🆔 **آیدی عددی:** `{u[0]}`
-👤 **نام کاربری:** {username_str}
-👥 **تعداد زیرمجموعه‌ها:** {u[4]} نفر
+👤 **نام کاربری اکانت:** {user.first_name}
+🆔 **آیدی:** `{u[0]}`
+{username_line}
+🎁 **هدیه مدیریت:** {u[6]}
+👁 **بازدیدهای شما:** {u[7]}
+📅 **بازدیدهای امروز:** {u[8]}
+🏆 **جوایز:** {u[9]}
+👥 **تعداد زیرمجموعه‌ها:** {u[4]}
+💰 **پورسانت زیرمجموعه‌گیری:** {u[10]}
 
-💰 **موجودی سکه ویو:** {u[2]}
-💎 **موجودی الماس ممبر:** {u[3]}"""
+💰 **موجودی سکه شما:** {u[2]}
+💎 **موجودی الماس شما:** {u[3]}"""
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    # ۳. بخش جذب زیرمجموعه
+    elif text == "👥جذب زیر مجموعه":
+        bot_username = context.bot.username
+        ref_link = f"https://t.me/{bot_username}?start={user.id}"
+        
+        msg = f"""👥 **جذب زیرمجموعه و دریافت سکه رایگان**
+
+🎉 با دعوت از هر دوست به ربات، **۲۰۰ سکه ویوگیر** و **۵۰ الماس ممبرگیر** دریافت کنید!
+
+🔗 **لینک اختصاصی شما:**
+`{ref_link}`
+
+لینک بالا را برای دوستان خود بفرستید تا با ورود آن‌ها سکه و الماس رایگان بگیرید."""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
     else:
-        await update.message.reply_text("این بخش در حال حاضر در حال ساخت و تنظیم است.", reply_markup=main_keyboard())
+        await update.message.reply_text("این بخش در حال حاضر در حال تنظیم است.", reply_markup=main_keyboard())
 
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
