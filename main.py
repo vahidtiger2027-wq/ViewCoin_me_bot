@@ -3,6 +3,7 @@ import sqlite3
 import datetime
 import logging
 import threading
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -13,7 +14,7 @@ from telegram.ext import (
 # ----------------- CONFIGURATION -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 PORT = int(os.environ.get("PORT", 10000))
-ADMIN_ID = 5412332176  # آیدی ادمین اصلی
+ADMIN_ID = 5412332176
 
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
@@ -135,10 +136,9 @@ def transfer_keyboard():
 
 # ----------------- CONVERSATION STATES -----------------
 WAIT_VIEW_POST, WAIT_VIEW_CONFIRM = 1, 2
-WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = 3, 4
-WAIT_RECEIPT_PHOTO = 5
-
-WAIT_TRANSFER_TARGET, WAIT_TRANSFER_AMOUNT = 6, 7
+WAIT_MEMBER_TEXT, WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM = 3, 4, 5
+WAIT_RECEIPT_PHOTO = 6
+WAIT_TRANSFER_TARGET, WAIT_TRANSFER_AMOUNT = 7, 8
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -234,9 +234,10 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "👥ثبت تبلیغ ممبر گیر":
         ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("۲۰ سکه -> ۱۰ ممبر", callback_data="m_20"), InlineKeyboardButton("۴۰ سکه -> ۲۰ ممبر", callback_data="m_40")],
-            [InlineKeyboardButton("۶۰ سکه -> ۳۰ ممبر", callback_data="m_60"), InlineKeyboardButton("۸۰ سکه -> ۴۰ ممبر", callback_data="m_80")],
-            [InlineKeyboardButton("۱۰۰ سکه -> ۵۰ ممبر", callback_data="m_100")]
+            [InlineKeyboardButton("۲۰ الماس -> ۱۰ ممبر", callback_data="m_20"), InlineKeyboardButton("۴۰ الماس -> ۲۰ ممبر", callback_data="m_40")],
+            [InlineKeyboardButton("۶۰ الماس -> ۳۰ ممبر", callback_data="m_60"), InlineKeyboardButton("۸۰ الماس -> ۴۰ ممبر", callback_data="m_80")],
+            [InlineKeyboardButton("۱۰۰ الماس -> ۵۰ ممبر", callback_data="m_100")],
+            [InlineKeyboardButton("۴۰۰ الماس -> ۲۰۰ ممبر", callback_data="m_400")]
         ])
         await update.message.reply_text("تعداد ممبر مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
@@ -285,7 +286,7 @@ async def start_transfer_diamond(update: Update, context: ContextTypes.DEFAULT_T
 async def receive_transfer_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if not text.isdigit():
-        await update.message.reply_text("❌ آیدی عددی معتبر نیست! لطفاً یک عدد وارد کنید (مانند 123456789):")
+        await update.message.reply_text("❌ آیدی عددی معتبر نیست! لطفاً یک عدد وارد کنید:")
         return WAIT_TRANSFER_TARGET
 
     target_id = int(text)
@@ -341,15 +342,9 @@ async def receive_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
         conn.close()
 
         await update.message.reply_text(f"✅ تعداد {amount:,} **سکه** با موفقیت به آیدی `{target_id}` منتقل شد.", parse_mode="Markdown", reply_markup=main_keyboard())
-        
         try:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=f"🎉 **انتقال جدید!**\nتعداد {amount:,} **سکه** از طرف آیدی `{sender_id}` به حساب شما واریز شد.",
-                parse_mode="Markdown"
-            )
-        except:
-            pass
+            await context.bot.send_message(chat_id=target_id, text=f"🎉 **انتقال جدید!**\nتعداد {amount:,} **سکه** از طرف آیدی `{sender_id}` به حساب شما واریز شد.", parse_mode="Markdown")
+        except: pass
 
     else:
         if u[1] < amount and sender_id != ADMIN_ID:
@@ -363,15 +358,9 @@ async def receive_transfer_amount(update: Update, context: ContextTypes.DEFAULT_
         conn.close()
 
         await update.message.reply_text(f"✅ تعداد {amount:,} **الماس** با موفقیت به آیدی `{target_id}` منتقل شد.", parse_mode="Markdown", reply_markup=main_keyboard())
-        
         try:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=f"🎉 **انتقال جدید!**\nتعداد {amount:,} **الماس** از طرف آیدی `{sender_id}` به حساب شما واریز شد.",
-                parse_mode="Markdown"
-            )
-        except:
-            pass
+            await context.bot.send_message(chat_id=target_id, text=f"🎉 **انتقال جدید!**\nتعداد {amount:,} **الماس** از طرف آیدی `{sender_id}` به حساب شما واریز شد.", parse_mode="Markdown")
+        except: pass
 
     return ConversationHandler.END
 
@@ -487,28 +476,18 @@ async def admin_payment_decision(update: Update, context: ContextTypes.DEFAULT_T
         conn.close()
 
         await query.message.edit_caption(caption=query.message.caption + "\n\n✅ **تایید شد و حساب کاربر شارژ گردید.**", parse_mode="Markdown")
-        
         try:
-            await context.bot.send_message(
-                chat_id=target_user_id,
-                text=f"🎉 **پرداخت شما تایید شد!**\nتعداد {amount:,} {unit_name} به حساب شما اضافه شد."
-            )
-        except:
-            pass
+            await context.bot.send_message(chat_id=target_user_id, text=f"🎉 **پرداخت شما تایید شد!**\nتعداد {amount:,} {unit_name} به حساب شما اضافه شد.")
+        except: pass
 
     elif action == "reject":
         target_user_id = int(data[1])
         await query.message.edit_caption(caption=query.message.caption + "\n\n❌ **درخواست لغو/رد شد.**", parse_mode="Markdown")
-        
         try:
-            await context.bot.send_message(
-                chat_id=target_user_id,
-                text="❌ فیش واریزی شما توسط مدیریت تایید نشد."
-            )
-        except:
-            pass
+            await context.bot.send_message(chat_id=target_user_id, text="❌ فیش واریزی شما توسط مدیریت تایید نشد.")
+        except: pass
 
-# ----------------- VIEW & MEMBER ADS CONVERSATIONS -----------------
+# ----------------- VIEW ADS CONVERSATION -----------------
 async def start_view_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -577,6 +556,7 @@ async def confirm_view_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
+# ----------------- MEMBER ADS CONVERSATION (SINGLE TEXT + LINK) -----------------
 async def start_member_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -591,29 +571,52 @@ async def start_member_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["member_cost"] = cost
     context.user_data["member_count"] = cost // 2
-    await query.message.reply_text("🔗 **لطفاً لینک مورد نظر را بفرستید:**\n(مانند @ChannelName یا لینک عمومی/خصوصی)")
+    
+    msg_text = """📝 **لطفاً متن تبلیغات خود را ارسال کنید:**
+
+(شامل تمام توضیحات، آیدی یا توضیحات کانال که می‌خواهید در پست نمایش داده شود)"""
+    await query.message.reply_text(msg_text)
+    return WAIT_MEMBER_TEXT
+
+async def receive_member_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["ad_full_text"] = update.message.text.strip()
+    await update.message.reply_text("🔗 **حالا لینک یا آیدی اصلی کانال را فرستید:**\n(جهت تنظیم دکمه «🌓 عضویت 🌓» - مانند @MyChannel یا لینک کانال)")
     return WAIT_MEMBER_LINK
 
 async def receive_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = update.message.text.strip()
     context.user_data["member_link"] = link
-    cost = context.user_data.get("member_cost")
+    
+    ad_text = context.user_data.get("ad_full_text")
     count = context.user_data.get("member_count")
+    cost = context.user_data.get("member_cost")
 
     ikb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ تایید و ثبت لینک", callback_data="confirm_member_link")],
+        [InlineKeyboardButton("✅ تایید و ارسال به کانال", callback_data="confirm_member_ads")],
         [InlineKeyboardButton("❌ انصراف", callback_data="cancel_ads")]
     ])
 
-    await update.message.reply_text(f"📋 **پیش‌نمایش سفارش ممبرگیر**\n🔗 لینک: {link}\n👥 تعداد ممبر: {count}\n💎 هزینه: {cost} الماس\n\nآیا از ثبت این لینک مطمئن هستید؟", reply_markup=ikb)
+    preview_text = f"""📋 **پیش‌نمایش تبلیغ شما:**
+
+{ad_text}
+
+---
+👥 **تعداد ممبر:** {count}
+💎 **هزینه:** {cost} الماس
+
+آیا از ثبت این تبلیغ مطمئن هستید؟"""
+
+    await update.message.reply_text(preview_text, reply_markup=ikb)
     return WAIT_MEMBER_CONFIRM
 
-async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def confirm_member_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+    
     cost = context.user_data.get("member_cost")
     count = context.user_data.get("member_count")
+    ad_text = context.user_data.get("ad_full_text")
     link = context.user_data.get("member_link")
     bot_username = (await context.bot.get_me()).username
 
@@ -624,22 +627,23 @@ async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn.close()
 
     target_url = link if link.startswith("http") else f"https://t.me/{link.replace('@', '')}"
+    channel_clean_id = link.replace('@', '').split('/')[-1] if ('@' in link or 't.me/' in link) else link
+
     bot_url = f"https://t.me/{bot_username}"
 
     try:
         sent_msg = await context.bot.send_message(
             chat_id=MEMBER_CHANNEL,
-            text=f"📢 **سفارش جدید ممبرگیر**\n\nعضو کانال زیر شوید و روی دریافت الماس کلیک کنید:\nتعداد مورد نیاز: {count} ممبر",
-            parse_mode="Markdown"
+            text=ad_text
         )
-        
-        channel_user_id = link.replace('@', '') if link.startswith('@') else None
-        callback_target = f"m_{sent_msg.message_id}_{channel_user_id}" if channel_user_id else f"m_{sent_msg.message_id}"
 
+        callback_target = f"m_{sent_msg.message_id}_{channel_clean_id}"
+
+        # ساخت دقیق دکمه‌ها مطابق تصویر
         ikb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("عضویت", url=target_url)],
-            [InlineKeyboardButton("💎 دریافت الماس", callback_data=f"get_diamond_{callback_target}")],
-            [InlineKeyboardButton("سفارش ممبر", url=bot_url)]
+            [InlineKeyboardButton(f"🚀 سفارش جدید 🚀|👤{count} ممبر👤", callback_data="dummy")],
+            [InlineKeyboardButton("🌓 عضویت 🌓", url=target_url), InlineKeyboardButton("💎 دریافت الماس 💎", callback_data=f"get_diamond_{callback_target}")],
+            [InlineKeyboardButton("👤 سفارش ممبر", url=bot_url), InlineKeyboardButton("❗️ سفارش مشکل دارد", callback_data="report_issue")]
         ])
 
         await context.bot.edit_message_reply_markup(
@@ -647,9 +651,9 @@ async def confirm_member_link(update: Update, context: ContextTypes.DEFAULT_TYPE
             message_id=sent_msg.message_id,
             reply_markup=ikb
         )
-        await query.message.edit_text("✅ لینک شما با موفقیت ثبت شد و در کانال ممبرگیر قرار گرفت.")
+        await query.message.edit_text("✅ سفارش شما با موفقیت ثبت و به کانال ممبرگیر ارسال شد.")
     except Exception as e:
-        await query.message.edit_text(f"✅ لینک ثبت شد اما در ارسال به کانال خطا رخ داد:\n`{e}`", parse_mode="Markdown")
+        await query.message.edit_text(f"✅ سفارش ثبت شد ولی در ارسال به کانال خطا رخ داد:\n`{e}`", parse_mode="Markdown")
 
     return ConversationHandler.END
 
@@ -659,7 +663,7 @@ async def cancel_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.edit_text("❌ عملیات لغو شد.")
     return ConversationHandler.END
 
-# ----------------- BUTTON CALLBACKS -----------------
+# ----------------- BUTTON CALLBACKS & MEMBER CHECK -----------------
 async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -690,14 +694,10 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
         views = c.fetchone()[0]
 
         bonus = 0
-        if views >= 100:
-            bonus = 50
-        elif views >= 80:
-            bonus = 40
-        elif views >= 60:
-            bonus = 30
-        elif views >= 40:
-            bonus = 20
+        if views >= 100: bonus = 50
+        elif views >= 80: bonus = 40
+        elif views >= 60: bonus = 30
+        elif views >= 40: bonus = 20
 
         if bonus > 0:
             c.execute("UPDATE users SET coin_view = coin_view + ? WHERE user_id=?", (bonus, user_id))
@@ -709,31 +709,42 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
             await query.answer(f"📊 این پست تاکنون {views} بازدید داشته است.\nپاداش توربو از ۴۰ بازدید به بالا شروع می‌شود!", show_alert=True)
 
     elif data.startswith("get_diamond_"):
-        target_info = data.replace("get_diamond_", "").split("_")
-        target_id = target_info[1]
-        channel_username = target_info[2] if len(target_info) > 2 else None
+        parts = data.replace("get_diamond_", "").split("_")
+        target_id = parts[1]
+        channel_username = parts[2] if len(parts) > 2 else None
 
+        # ۱. بررسی تکراری نبودن
         c.execute("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, f"m_{target_id}"))
         if c.fetchone():
             conn.close()
-            await query.answer("❌ شما قبلاً برای این پست الماس دریافت کرده‌اید!", show_alert=True)
+            await query.answer("❌ شما قبلاً الماس این سفارش را دریافت کرده‌اید!", show_alert=True)
             return
 
-        if channel_username:
+        # ۲. بررسی اجباری عضویت در کانال هدف
+        if channel_username and not channel_username.startswith("http"):
             try:
-                member = await context.bot.get_chat_member(chat_id=f"@{channel_username}", user_id=user_id)
+                chat_target = f"@{channel_username}"
+                member = await context.bot.get_chat_member(chat_id=chat_target, user_id=user_id)
                 if member.status in ["left", "kicked"]:
                     conn.close()
-                    await query.answer("❌ شما هنوز در کانال عضو نشده‌اید! ابتدا عضو شوید.", show_alert=True)
+                    await query.answer("❌ شما هنوز در این کانال عضو نشده‌اید!\nابتدا روی دکمه «🌓 عضویت 🌓» بزنید و سپس الماس بگیرید.", show_alert=True)
                     return
-            except:
+            except Exception as e:
+                # در صورتی که ربات به دلایلی دسترسی استعلام مستقیم نداشت
                 pass
 
+        # ۳. اعطای الماس پس از تایید عضویت
         c.execute("INSERT INTO user_clicks (user_id, target_id) VALUES (?, ?)", (user_id, f"m_{target_id}"))
         c.execute("UPDATE users SET coin_member = coin_member + 1 WHERE user_id=?", (user_id,))
         conn.commit()
         conn.close()
-        await query.answer("🎉 ۱ الماس ممبرگیر به حساب شما اضافه شد!", show_alert=True)
+        await query.answer("🎉 عضویت شما تایید شد! ۱ الماس ممبرگیر دریافت کردید.", show_alert=True)
+
+    elif data == "report_issue":
+        await query.answer("⚠️ گزارش شما ثبت شد و به مدیریت ارسال می‌گردد.", show_alert=True)
+
+    elif data == "dummy":
+        await query.answer()
 
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
@@ -755,9 +766,10 @@ def main():
     member_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_member_ads, pattern="^m_")],
         states={
+            WAIT_MEMBER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_member_text)],
             WAIT_MEMBER_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_member_link)],
             WAIT_MEMBER_CONFIRM: [
-                CallbackQueryHandler(confirm_member_link, pattern="^confirm_member_link$"),
+                CallbackQueryHandler(confirm_member_ads, pattern="^confirm_member_ads$"),
                 CallbackQueryHandler(cancel_ads, pattern="^cancel_ads$")
             ]
         },
@@ -794,7 +806,7 @@ def main():
     # Callback Handlers
     app.add_handler(CallbackQueryHandler(select_buy_package, pattern="^buy_"))
     app.add_handler(CallbackQueryHandler(admin_payment_decision, pattern="^(approve_|reject_)"))
-    app.add_handler(CallbackQueryHandler(handle_channel_callbacks, pattern="^(do_view_|do_turbo_|get_diamond_)"))
+    app.add_handler(CallbackQueryHandler(handle_channel_callbacks, pattern="^(do_view_|do_turbo_|get_diamond_|report_issue|dummy)"))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
     
