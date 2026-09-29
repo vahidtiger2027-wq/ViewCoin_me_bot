@@ -75,10 +75,12 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS lottery_settings (
         id INTEGER PRIMARY KEY,
         is_active INTEGER DEFAULT 1,
-        prize_1 TEXT DEFAULT '50,000 سکه ویو',
-        prize_2 TEXT DEFAULT '30,000 سکه ویo',
-        prize_3 TEXT DEFAULT '10,000 سکه ویو',
-        draw_date TEXT DEFAULT 'پایان هر ماه'
+        prize_1 TEXT DEFAULT '0 الماس ممبرگیر',
+        prize_2 TEXT DEFAULT '0 سکه ویوگیر',
+        prize_3 TEXT DEFAULT '0 سکه ویوگیر',
+        last_winner_1 TEXT DEFAULT '',
+        last_winner_2 TEXT DEFAULT '',
+        last_winner_3 TEXT DEFAULT ''
     )''')
     
     c.execute("INSERT OR IGNORE INTO lottery_settings (id, is_active) VALUES (1, 1)")
@@ -118,7 +120,7 @@ def get_or_create_user(user_id, username="", referrer_id=0):
 def get_lottery_settings():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT is_active, prize_1, prize_2, prize_3, draw_date FROM lottery_settings WHERE id=1")
+    c.execute("SELECT is_active, prize_1, prize_2, prize_3, last_winner_1, last_winner_2, last_winner_3 FROM lottery_settings WHERE id=1")
     s = c.fetchone()
     conn.close()
     return s
@@ -141,7 +143,7 @@ def main_keyboard():
         ["💎جم اوری سکه رایگان"],
         ["💻حصاب کار بری مشحصات", "👥جذب زیر مجموعه"],
         ["📥ثبت تبلیغ ویو گیر و ممبر گیر"],
-        ["👨‍💻🛍︎فروشگاه", "دکمه قرعه کشی"],
+        ["👨‍💻🛍︎فروشگاه", "قرعه کشی"],
         ["💰 انتقال سکه", "💎︎  انتقال الماس"]
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
@@ -233,7 +235,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 لینک بالا را برای دوستان خود بفرستید تا با ورود آن‌ها سکه و الماس رایگان بگیرید."""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
-    elif text == "دکمه قرعه کشی":
+    elif text == "قرعه کشی":
         settings = get_lottery_settings()
         is_active = settings[0]
 
@@ -243,17 +245,11 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         ikb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🎟 ورود به قرعه کشی", callback_data="lottery_enter")],
-            [InlineKeyboardButton("🏆 نمایش برندگان قرعه کشی", callback_data="lottery_winners")]
+            [InlineKeyboardButton("🏆 نمایش برندگان قرعه کشی", callback_data="lottery_winners")],
+            [InlineKeyboardButton("🎁 نمایش جوایز قرعه کشی", callback_data="lottery_prizes")]
         ])
 
-        msg = f"""🎉 **به بخش قرعه‌کشی بزرگ ربات خوش آمدید!**
-
-برای شرکت در قرعه‌کشی و شانس برنده شدن جوایز ویژه، کافیست از فروشگاه خرید کنید و بلیت شانس دریافت کنید!
-
-🎟 **تعداد بلیت‌های فعلی شما:** {u[11]} عدد
-
-یکی از گزینه‌های زیر را انتخاب کنید:"""
-        await update.message.reply_text(msg, reply_markup=ikb, parse_mode="Markdown")
+        await update.message.reply_text("🎉 **به بخش قرعه‌کشی خوش آمدید!**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:", reply_markup=ikb, parse_mode="Markdown")
 
     elif text == "📥ثبت تبلیغ ویو گیر و ممبر گیر":
         await update.message.reply_text("لطفاً نوع تبلیغ مورد نظر خود را انتخاب کنید:", reply_markup=ads_keyboard())
@@ -303,35 +299,49 @@ async def handle_lottery_callbacks(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     data = query.data
+    user = query.from_user
+    u = get_or_create_user(user.id, user.username or "")
 
     if data == "lottery_enter":
         ikb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🛒 ورود به فروشگاه", callback_data="goto_shop")]
         ])
 
-        msg = """✨ **برای ورود به قرعه‌کشی بزرگ کافیست از فروشگاه خرید کنید:**
+        msg = f"""به قرعه کشی ربات خوش امدید
+برایه ورود در قرعه کشی در ربات بزرگ ممبرگیر وویوگیر
+باید از ربات خرید کنید و بلیت شانش دریافت کنید
 
-💵 **۵۰,۰۰۰ تومان خرید** ⬅️ دریافت **۲ بلیت**
-💵 **۱۰۰,۰۰۰ تومان خرید** ⬅️ دریافت **۴ بلیت**
-💵 **۲۰۰,۰۰۰ تومان خرید** ⬅️ دریافت **۶ بلیت**
-💵 **۵۰۰,۰۰۰ تومان خرید** ⬅️ دریافت **۱۰ بلیت**
+🎟 **بیلیت شما:** {u[11]} 
 
-با هر خرید، بلیت‌های شما به‌صورت اتوماتیک ثبت و افزوده می‌شوند."""
-        await query.message.reply_text(msg, reply_markup=ikb, parse_mode="Markdown")
+۵۰.۰۰۰ هزار تومان خرید ۲ بلیت
+۱۰۰.۰۰۰ هزار تومان خرید ۴ بلیت
+۲۰۰.۰۰۰ هزار تومان خرید ۶ بلیت
+۵۰۰.۰۰۰ هزار تومان خرید ۱۰ بلیت"""
+        await query.message.reply_text(msg, reply_markup=ikb)
 
     elif data == "lottery_winners":
         settings = get_lottery_settings()
-        p1, p2, p3, draw_date = settings[1], settings[2], settings[3], settings[4]
+        w1, w2, w3 = settings[4], settings[5], settings[6]
 
-        msg = f"""🏆 **جوایز این دوره قرعه‌کشی:**
+        if not w1 and not w2 and not w3:
+            await query.message.reply_text("هنوز برنده‌ای وجود ندارد")
+        else:
+            msg = f"""🏆 **برندگان آخرین دوره قرعه‌کشی:**
+
+🥇 **نفر اول:** {w1 if w1 else 'مشخص نشده'}
+🥈 **نفر دوم:** {w2 if w2 else 'مشخص نشده'}
+🥉 **نفر سوم:** {w3 if w3 else 'مشخص نشده'}"""
+            await query.message.reply_text(msg, parse_mode="Markdown")
+
+    elif data == "lottery_prizes":
+        settings = get_lottery_settings()
+        p1, p2, p3 = settings[1], settings[2], settings[3]
+
+        msg = f"""🎁 **لیست جوایز قرعه‌کشی:**
 
 🥇 **نفر اول:** {p1}
 🥈 **نفر دوم:** {p2}
-🥉 **نفر سوم:** {p3}
-
-📅 **تاریخ برگزاری قرعه‌کشی:** {draw_date}
-
-شما هم می‌توانید با خرید از فروشگاه و دریافت بلیت، یکی از برندگان ما باشید!"""
+🥉 **نفر سوم:** {p3}"""
         await query.message.reply_text(msg, parse_mode="Markdown")
 
     elif data == "goto_shop":
