@@ -1,4 +1,10 @@
-telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+import os
+import sqlite3
+import datetime
+import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters, ConversationHandler
@@ -58,11 +64,6 @@ def init_db():
         target_id TEXT,
         click_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, target_id)
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS post_views (
-        post_id TEXT PRIMARY KEY,
-        view_count INTEGER DEFAULT 0
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS bot_settings (
@@ -201,9 +202,9 @@ def admin_keyboard():
 
 # ----------------- CONVERSATION STATES -----------------
 (WAIT_VIEW_POST, WAIT_VIEW_CONFIRM, WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM, 
- WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD) = range(6)
+ WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD, WAIT_TRANSFER_COIN, WAIT_TRANSFER_DIAMOND) = range(8)
 
-# ----------------- HANDLERS -----------------
+# ----------------- START & MAIN MESSAGES -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -299,7 +300,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await update.message.reply_text("تعداد ممبر مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
-    elif text == "👨‍💻🛍︎︎فروشگاه":
+    elif text in ["👨‍💻🛍︎فروشگاه", "👨‍💻🛍فروشگاه"]:
         await update.message.reply_text("به فروشگاه خوش آمدید! بخش مورد نظر را انتخاب کنید:", reply_markup=shop_keyboard())
 
     elif text == "👁خرید سکه ویوگیر":
@@ -324,52 +325,106 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "بازگشت به منوی اصلی":
         await update.message.reply_text("به منوی اصلی بازگشتید.", reply_markup=main_keyboard(user.id))
 
-    # ------------ ADMIN COMMANDS ------------
+    # ------------ ADMIN PANEL ------------
     elif text == "⚙ پنل مدیریت" and user.id in ADMIN_IDS:
         await update.message.reply_text("⚙️ **به پنل مدیریت خوش آمدید:**", reply_markup=admin_keyboard(), parse_mode="Markdown")
 
     elif text == "📊 آمار کاربران" and user.id in ADMIN_IDS:
-        # کل کاربران و لفت داده‌ها
         tot_u = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0] or 0
         left_u = db_query("SELECT COUNT(*) FROM users WHERE is_left = 1", fetchone=True)[0] or 0
-        
-        # بیشترین ویو ثبت شده توسط یک کاربر
         max_view = db_query("SELECT MAX(total_views) FROM users", fetchone=True)[0] or 0
-        
-        # بیشترین سکه موجود/دریافتی
         max_coin = db_query("SELECT MAX(coin_view) FROM users", fetchone=True)[0] or 0
-        
-        # بیشترین الماس موجود/دریافتی
         max_diamond = db_query("SELECT MAX(coin_member) FROM users", fetchone=True)[0] or 0
         
-        # بیشترین کلیک / کلک (پرفعالیت‌ترین کاربر)
-        max_activity = db_query("SELECT MAX(cnt) FROM (SELECT COUNT(*) as cnt FROM user_clicks GROUP BY user_id)", fetchone=True)
-        max_activity_val = max_activity[0] if max_activity else 0
+        max_act_res = db_query("SELECT MAX(cnt) FROM (SELECT COUNT(*) as cnt FROM user_clicks GROUP BY user_id)", fetchone=True)
+        max_activity_val = max_act_res[0] if max_act_res and max_act_res[0] else 0
 
-        # بالاترین جوین شده (بیشترین زیرمجموعه)
         max_ref = db_query("SELECT MAX(ref_count) FROM users", fetchone=True)[0] or 0
-
-        # تعداد کاربران شرکت‌کننده در قرعه‌کشی (دارای حداقل ۱ بلیت)
         lottery_users = db_query("SELECT COUNT(*) FROM users WHERE tickets > 0", fetchone=True)[0] or 0
-
-        # آمار کل خرید فروشگاه
         tot_s = db_query("SELECT SUM(total_spent) FROM users", fetchone=True)[0] or 0
         
-        msg = f"""📊 **آمار کامل و دقیق ربات:**
+        msg = f"""📊 **آمار کامل کاربران و ربات:**
 
 👥 **تعداد کل کاربران:** {tot_u:,} نفر
 🚪 **تعداد لفت‌داده‌ها:** {left_u:,} نفر
 
-👁 **بیشترین ویو:** {max_view:,} بازدید
-💰 **بیشترین سکه دریافتی:** {max_coin:,} سکه
-💎 **بیشترین الماس دریافتی:** {max_diamond:,} الماس
+👁 **بیشترین ویو:** {max_view:,}
+💰 **بیشترین سکه دریافتی:** {max_coin:,}
+💎 **بیشترین الماس دریافتی:** {max_diamond:,}
 
 ⚡️ **بیشترین فعالیت:** {max_activity_val:,} انجام کار
-🔗 **بالاترین جوین‌شده (زیرمجموعه):** {max_ref:,} نفر
+🔗 **بالاترین جوین‌شده:** {max_ref:,} نفر
 🎟 **تعداد شرکت کنندگان قرعه‌کشی:** {lottery_users:,} نفر
 
-💳 **آمار خرید (مبلغ فروشگاه):** {tot_s:,} تومان"""
+💳 **آمار خرید (فروشگاه):** {tot_s:,} تومان"""
         await update.message.reply_text(msg, parse_mode="Markdown")
+
+# ----------------- COIN & DIAMOND TRANSFERS -----------------
+async def start_transfer_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💰 **انتقال سکه ویو**\n\nلطفاً شناسه عددی (User ID) و تعداد سکه را با یک فاصله بفرستید:\nمثال: `123456789 50`", parse_mode="Markdown")
+    return WAIT_TRANSFER_COIN
+
+async def process_transfer_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().split()
+    user_id = update.effective_user.id
+    if len(text) != 2 or not text[0].isdigit() or not text[1].isdigit():
+        await update.message.reply_text("❌ فرمت نامعتبر است. مثال: `123456789 50`", parse_mode="Markdown")
+        return ConversationHandler.END
+
+    target_id, amount = int(text[0]), int(text[1])
+    u = get_or_create_user(user_id)
+    
+    if u[2] < amount:
+        await update.message.reply_text("❌ موجودی سکه شما کافی نیست!")
+        return ConversationHandler.END
+
+    target_u = db_query("SELECT * FROM users WHERE user_id=?", (target_id,), fetchone=True)
+    if not target_u:
+        await update.message.reply_text("❌ کاربر مقصد در ربات یافت نشد!")
+        return ConversationHandler.END
+
+    db_query("UPDATE users SET coin_view = coin_view - ? WHERE user_id=?", (amount, user_id), commit=True)
+    db_query("UPDATE users SET coin_view = coin_view + ? WHERE user_id=?", (amount, target_id), commit=True)
+
+    await update.message.reply_text(f"✅ تعداد {amount} سکه با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
+    try:
+        await context.bot.send_message(chat_id=target_id, text=f"🎉 تعداد {amount} سکه ویو از طرف کاربر `{user_id}` به حساب شما منتقل شد!", parse_mode="Markdown")
+    except:
+        pass
+    return ConversationHandler.END
+
+async def start_transfer_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💎 **انتقال الماس ممبر**\n\nلطفاً شناسه عددی (User ID) و تعداد الماس را با یک فاصله بفرستید:\nمثال: `123456789 20`", parse_mode="Markdown")
+    return WAIT_TRANSFER_DIAMOND
+
+async def process_transfer_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().split()
+    user_id = update.effective_user.id
+    if len(text) != 2 or not text[0].isdigit() or not text[1].isdigit():
+        await update.message.reply_text("❌ فرمت نامعتبر است. مثال: `123456789 20`", parse_mode="Markdown")
+        return ConversationHandler.END
+
+    target_id, amount = int(text[0]), int(text[1])
+    u = get_or_create_user(user_id)
+    
+    if u[3] < amount:
+        await update.message.reply_text("❌ موجودی الماس شما کافی نیست!")
+        return ConversationHandler.END
+
+    target_u = db_query("SELECT * FROM users WHERE user_id=?", (target_id,), fetchone=True)
+    if not target_u:
+        await update.message.reply_text("❌ کاربر مقصد در ربات یافت نشد!")
+        return ConversationHandler.END
+
+    db_query("UPDATE users SET coin_member = coin_member - ? WHERE user_id=?", (amount, user_id), commit=True)
+    db_query("UPDATE users SET coin_member = coin_member + ? WHERE user_id=?", (amount, target_id), commit=True)
+
+    await update.message.reply_text(f"✅ تعداد {amount} الماس با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
+    try:
+        await context.bot.send_message(chat_id=target_id, text=f"🎉 تعداد {amount} الماس ممبر از طرف کاربر `{user_id}` به حساب شما منتقل شد!", parse_mode="Markdown")
+    except:
+        pass
+    return ConversationHandler.END
 
 # ----------------- ADMIN SETTINGS FUNCTIONS -----------------
 async def start_set_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -687,7 +742,7 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
     elif data.startswith("get_diamond_"):
         info = data.replace("get_diamond_", "").split("_")
         target_id = info[1]
-        channel_un = info[2] if len(info) > 0 and len(info) > 2 else None
+        channel_un = info[2] if len(info) > 2 else None
 
         if db_query("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, f"m_{target_id}"), fetchone=True):
             await query.answer("❌ قبلاً پاداش این کانال را دریافت کرده‌اید!", show_alert=True)
@@ -743,11 +798,26 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
 
-    # گفتگو برای تنظیم شماره کارت
     card_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^💳 تنظیم شماره کارت$"), start_set_card)],
         states={
             WAIT_NEW_CARD: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_new_card)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
+    )
+
+    transfer_coin_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💰 انتقال سکه$"), start_transfer_coin)],
+        states={
+            WAIT_TRANSFER_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_coin)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
+    )
+
+    transfer_diamond_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💎︎  انتقال الماس$"), start_transfer_diamond)],
+        states={
+            WAIT_TRANSFER_DIAMOND: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_transfer_diamond)]
         },
         fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
     )
@@ -757,6 +827,8 @@ def main():
     app.add_handler(member_conv)
     app.add_handler(receipt_conv)
     app.add_handler(card_conv)
+    app.add_handler(transfer_coin_conv)
+    app.add_handler(transfer_diamond_conv)
 
     app.add_handler(CallbackQueryHandler(handle_lottery_callbacks, pattern="^(lottery_|goto_shop)"))
     app.add_handler(CallbackQueryHandler(select_buy_package, pattern="^buy_"))
