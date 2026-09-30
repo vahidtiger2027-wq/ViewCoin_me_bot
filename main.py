@@ -13,11 +13,9 @@ from telegram.ext import (
 # ----------------- CONFIGURATION -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 PORT = int(os.environ.get("PORT", 10000))
-ADMIN_ID = 5412332176
-ADMIN_IDS = [ADMIN_ID]
 
-VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
-MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
+# آیدی‌های ادمین (میتوانید آیدی‌های دیگر را هم اضافه کنید)
+ADMIN_IDS = [5412332176]
 
 logging.basicConfig(level=logging.INFO)
 
@@ -57,13 +55,6 @@ def init_db():
         tickets INTEGER DEFAULT 0,
         total_spent INTEGER DEFAULT 0,
         is_left INTEGER DEFAULT 0
-    )''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS user_clicks (
-        user_id INTEGER,
-        target_id TEXT,
-        click_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (user_id, target_id)
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS bot_settings (
@@ -135,8 +126,7 @@ def get_or_create_user(user_id, username="", referrer_id=0):
     u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
     if not u:
         st = get_settings()
-        ref_c = st[5]
-        ref_d = st[6]
+        ref_c, ref_d = st[5], st[6]
         
         db_query("""INSERT INTO users 
             (user_id, username, coin_view, coin_member, ref_count, last_daily, admin_gift, total_views, today_views, lottery_wins, ref_commission, referrer_id, tickets, total_spent, is_left) 
@@ -194,14 +184,10 @@ def admin_keyboard():
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 # ----------------- CONVERSATION STATES -----------------
-(WAIT_CARD_NUM, WAIT_GATEWAY, WAIT_DAILY_C, WAIT_DAILY_D, 
- WAIT_REF_C, WAIT_REF_D, WAIT_BROADCAST, WAIT_SPONSORS,
- WAIT_TRANSFER_COIN_ID, WAIT_TRANSFER_COIN_AMT,
- WAIT_TRANSFER_DIAMOND_ID, WAIT_TRANSFER_DIAMOND_AMT,
- WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
- WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(16)
+(WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
+ WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(4)
 
-# ----------------- START & USER HANDLERS -----------------
+# ----------------- USER HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -232,7 +218,7 @@ async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_T
         st = get_settings()
         await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{st[10]}", reply_markup=main_keyboard(user.id))
     else:
-        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌اید!", show_alert=True)
+        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌‌‌اید!", show_alert=True)
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
@@ -316,7 +302,7 @@ async def ads_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📥 لطفاً نوع تبلیغ خود را انتخاب کنید (ویوگیر یا ممبرگیر):")
 
 async def transfer_coin_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💰 لطفاً آیدی عددی فردی که می‌‌خواهید سکه منتقل کنید را وارد کنید:")
+    await update.message.reply_text("💰 لطفاً آیدی عددی فردی که می‌خواهید سکه منتقل کنید را وارد کنید:")
 
 async def transfer_diamond_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💎 لطفاً آیدی عددی فردی که می‌خواهید الماس منتقل کنید را وارد کنید:")
@@ -334,7 +320,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
-    # ----------------- LOTTERY ADMIN SETTINGS -----------------
+# ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -354,7 +340,7 @@ async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("🎁 تنظیم جوایز اول تا سوم", callback_data="set_prizes_menu")],
         [InlineKeyboardButton("🎫 تنظیم قیمت بیلیت قرعه کشی", callback_data="set_ticket_prices_menu")]
     ])
-    msg = f"⚙️ **تنظیمات قرعه‌کشی**\n\nوضعیت فعلی: **{status_str}**\nبازه فعلی: **{st[14]}**"
+    msg = f"⚙️ **تنظیمات قرعه‌‌کشی**\n\nوضعیت فعلی: **{status_str}**\nبازه فعلی: **{st[14]}**"
     await update.message.reply_text(msg, reply_markup=ikb, parse_mode="Markdown")
 
 async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -524,7 +510,7 @@ def main():
     # Commands
     app.add_handler(CommandHandler("start", start))
 
-    # User Buttons (Exact Regex Matches from Screenshot)
+    # User Buttons
     app.add_handler(MessageHandler(filters.Regex(".*حساب کار بری مشخصات.*"), user_profile))
     app.add_handler(MessageHandler(filters.Regex(".*جم اوری سکه رایگان.*"), get_free_coins))
     app.add_handler(MessageHandler(filters.Regex(".*جذب زیر مجموعه.*"), ref_link))
