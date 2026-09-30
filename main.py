@@ -194,13 +194,14 @@ def admin_keyboard():
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 # ----------------- CONVERSATION STATES -----------------
-(WAIT_VIEW_POST, WAIT_VIEW_CONFIRM, WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM, 
- WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD, WAIT_TRANSFER_COIN, WAIT_TRANSFER_DIAMOND,
- WAIT_DAILY_DIAMOND, WAIT_DAILY_COIN, WAIT_GATEWAY_URL,
+(WAIT_CARD_NUM, WAIT_GATEWAY, WAIT_DAILY_C, WAIT_DAILY_D, 
+ WAIT_REF_C, WAIT_REF_D, WAIT_BROADCAST, WAIT_SPONSORS,
+ WAIT_TRANSFER_COIN_ID, WAIT_TRANSFER_COIN_AMT,
+ WAIT_TRANSFER_DIAMOND_ID, WAIT_TRANSFER_DIAMOND_AMT,
  WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
- WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(15)
+ WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(16)
 
-# ----------------- START -----------------
+# ----------------- START & USER HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -222,9 +223,109 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = get_settings()
     await update.message.reply_text(f"{st[10]}\n\nسلام {user.first_name} عزیز، خوش آمدید!", reply_markup=main_keyboard(user.id))
 
+async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = update.effective_user
+    if await check_sponsors(user.id, context):
+        await query.message.delete()
+        st = get_settings()
+        await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{st[10]}", reply_markup=main_keyboard(user.id))
+    else:
+        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌اید!", show_alert=True)
+
+async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
+    if not u:
+        return
+    msg = f"""💻 **حساب کاربری شما:**
+
+🆔 **شناسه عددی:** `{u[0]}`
+🪙 **سکه بازدید:** {u[2]}
+💎 **الماس ممبر:** {u[3]}
+👥 **تعداد زیرمجموعه:** {u[4]}
+🎫 **تعداد بلیت قرعه‌کشی:** {u[12]}
+🎁 **جوایز قرعه‌کشی برنده شده:** {u[9]}
+💰 **پورسانت زیرمجموعه:** {u[10]}"""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def get_free_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    st = get_settings()
+    
+    today_str = datetime.date.today().strftime("%Y-%m-%d")
+    if u[5] == today_str:
+        await update.message.reply_text("❌ شما هدیه روزانه امروز خود را دریافت کرده‌اید. فردا دوباره تلاش کنید!")
+        return
+
+    db_query("UPDATE users SET coin_view = coin_view + ?, coin_member = coin_member + ?, last_daily = ? WHERE user_id = ?",
+             (st[3], st[4], today_str, user_id), commit=True)
+    await update.message.reply_text(f"🎁 هدیه روزانه شما شامل {st[3]} سکه و {st[4]} الماس با موفقیت واریز شد!")
+
+async def ref_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot_info = await context.bot.get_me()
+    st = get_settings()
+    user_id = update.effective_user.id
+    link = f"https://t.me/{bot_info.username}?start={user_id}"
+    msg = f"""👥 **برنامه دعوت دوستان**
+
+با دعوت هر دوست به ربات:
+🪙 **{st[5]} سکه**
+💎 **{st[6]} الماس**
+دریافت کنید!
+
+🔗 **لینک اختصاصی شما:**
+`{link}`"""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    st = get_settings()
+    msg = f"""👨‍💻🛍 **فروشگاه ربات**
+
+💳 **شماره کارت جهت واریز:**
+`{st[1]}`
+
+🔗 **لینک درگاه پرداخت:**
+{st[2]}
+
+پس از واریز، عکس فیش واریزی را برای پشتیبانی ارسال کنید."""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    st = get_settings()
+    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
+    status_str = "🟢 فعال" if st[13] else "🔴 غیرفعال"
+    
+    msg = f"""🎉 **قرعه‌کشی بزرگ ربات**
+
+📌 **وضعیت:** {status_str}
+📅 **بازه برگزاری:** {st[14]}
+
+🎁 **جوایز این دوره:**
+🥇 **نفر اول:** {st[15]}
+🥈 **نفر دوم:** {st[16]}
+🥉 **نفر سوم:** {st[17]}
+
+🎫 **تعداد بلیت‌های شما:** {u[12]}
+
+شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌کشی دریافت می‌کنید!"""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
+
+# ----------------- ADMIN PANEL HANDLERS -----------------
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id in ADMIN_IDS:
-        await update.message.reply_text("⚙️ به پنل مدیریت خوش آمدید:", reply_markup=admin_keyboard())# ----------------- LOTTERY ADMIN SETTINGS -----------------
+        await update.message.reply_text("⚙️ به پنل مدیریت خوش آمدید:", reply_markup=admin_keyboard())
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
+    await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
+# ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -303,7 +404,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
             ikb.append([InlineKeyboardButton(f"قیمت ( {p[1]:,} )   بیلیت  ( {p[2]} )", callback_data=f"edit_pack_{p[0]}")])
         await query.message.edit_text("⚙️ **کادرهای ۵ گانه تنظیم قیمت و بلیت:**\nجهت ویرایش روی هر کادر کلیک کنید:", reply_markup=InlineKeyboardMarkup(ikb), parse_mode="Markdown")
 
-# ----------------- PRIZE & PACK INPUT HANDLERS -----------------
+# ----------------- PRIZE & PACK CONVERSATION HANDLERS -----------------
 async def start_prize_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -386,23 +487,6 @@ async def receive_pack_count(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(f"✅ کادر به‌روزرسانی شد:\nقیمت: {price:,} تومان | بلیت: {tickets}")
     return ConversationHandler.END
 
-# ----------------- MAIN USER MENU HANDLERS -----------------
-async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
-    if not u:
-        return
-    msg = f"""📱 **شناسه کاربری:** `{u[0]}`
-💎 **تعداد الماس (عضویت):** {u[3]}
-🪙 **تعداد سکه (بازدید):** {u[2]}
-👥 **تعداد زیرمجموعه:** {u[4]}
-🎫 **تعداد بلیت قرعه‌کشی:** {u[12]}
-🎁 **جوایز گرفته شده از قرعه‌کشی:** {u[9]}
-💰 **پورسانت زیرمجموعه:** {u[10]}"""
-    await update.message.reply_text(msg, parse_mode="Markdown")
-
-async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
-
 # ----------------- MAIN APPLICATION STARTUP -----------------
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
@@ -428,16 +512,26 @@ def main():
         fallbacks=[]
     )
 
-    # Command & Message Handlers
+    # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Regex("^⚙ پنل مدیریت$"), admin_panel))
-    app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
+
+    # User Buttons
     app.add_handler(MessageHandler(filters.Regex("^💻حصاب کار بری مشحصات$"), user_profile))
+    app.add_handler(MessageHandler(filters.Regex("^💎جم اوری سکه رایگان$"), get_free_coins))
+    app.add_handler(MessageHandler(filters.Regex("^👥جذب زیر مجموعه$"), ref_link))
+    app.add_handler(MessageHandler(filters.Regex("^👨‍💻🛍فروشگاه$"), shop_menu))
+    app.add_handler(MessageHandler(filters.Regex("^قرعه کشی$"), lottery_user_menu))
+    app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
+
+    # Admin Buttons
+    app.add_handler(MessageHandler(filters.Regex("^⚙ پنل مدیریت$"), admin_panel))
+    app.add_handler(MessageHandler(filters.Regex("^📊 آمار کاربران$"), admin_stats))
     app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
-    
-    # Callback Handlers
+
+    # Callback Query Handlers
     app.add_handler(prize_conv)
     app.add_handler(pack_conv)
+    app.add_handler(CallbackQueryHandler(check_sponsor_callback, pattern="^check_sponsor_again$"))
     app.add_handler(CallbackQueryHandler(handle_lottery_admin_callbacks, pattern="^(lottery_|set_prizes_menu|prize_rank_|set_ticket_prices_menu)"))
 
     logging.info("Bot is running...")
