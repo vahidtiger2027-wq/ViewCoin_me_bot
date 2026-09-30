@@ -174,13 +174,13 @@ async def check_sponsors(user_id, context):
 def main_keyboard(user_id):
     kb = [
         ["💎جم اوری سکه رایگان"],
-        ["💻حصاب کار بری مشحصات", "👥جذب زیر مجموعه"],
+        ["💻حساب کار بری مشخصات", "👥جذب زیر مجموعه"],
         ["📥ثبت تبلیغ ویو گیر و ممبر گیر"],
         ["👨‍💻🛍فروشگاه", "قرعه کشی"],
-        ["💰 انتقال سکه", "💎︎  انتقال الماس"]
+        ["💰انتقال سکه", "💎انتقال الماس"]
     ]
     if user_id in ADMIN_IDS:
-        kb.append(["⚙ پنل مدیریت"])
+        kb.append(["⚙️ پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def admin_keyboard():
@@ -312,6 +312,15 @@ async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌کشی دریافت می‌کنید!"""
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+async def ads_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📥 لطفاً نوع تبلیغ خود را انتخاب کنید (ویوگیر یا ممبرگیر):")
+
+async def transfer_coin_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💰 لطفاً آیدی عددی فردی که می‌‌خواهید سکه منتقل کنید را وارد کنید:")
+
+async def transfer_diamond_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💎 لطفاً آیدی عددی فردی که می‌خواهید الماس منتقل کنید را وارد کنید:")
+
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
 
@@ -325,7 +334,7 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
-# ----------------- LOTTERY ADMIN SETTINGS -----------------
+    # ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -515,16 +524,19 @@ def main():
     # Commands
     app.add_handler(CommandHandler("start", start))
 
-    # User Buttons
-    app.add_handler(MessageHandler(filters.Regex("^💻حصاب کار بری مشحصات$"), user_profile))
-    app.add_handler(MessageHandler(filters.Regex("^💎جم اوری سکه رایگان$"), get_free_coins))
-    app.add_handler(MessageHandler(filters.Regex("^👥جذب زیر مجموعه$"), ref_link))
-    app.add_handler(MessageHandler(filters.Regex("^👨‍💻🛍فروشگاه$"), shop_menu))
-    app.add_handler(MessageHandler(filters.Regex("^قرعه کشی$"), lottery_user_menu))
+    # User Buttons (Exact Regex Matches from Screenshot)
+    app.add_handler(MessageHandler(filters.Regex(".*حساب کار بری مشخصات.*"), user_profile))
+    app.add_handler(MessageHandler(filters.Regex(".*جم اوری سکه رایگان.*"), get_free_coins))
+    app.add_handler(MessageHandler(filters.Regex(".*جذب زیر مجموعه.*"), ref_link))
+    app.add_handler(MessageHandler(filters.Regex(".*ثبت تبلیغ ویو گیر و ممبر گیر.*"), ads_menu))
+    app.add_handler(MessageHandler(filters.Regex(".*فروشگاه.*"), shop_menu))
+    app.add_handler(MessageHandler(filters.Regex(".*قرعه کشی.*"), lottery_user_menu))
+    app.add_handler(MessageHandler(filters.Regex(".*انتقال سکه.*"), transfer_coin_prompt))
+    app.add_handler(MessageHandler(filters.Regex(".*انتقال الماس.*"), transfer_diamond_prompt))
     app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
 
     # Admin Buttons
-    app.add_handler(MessageHandler(filters.Regex("^⚙ پنل مدیریت$"), admin_panel))
+    app.add_handler(MessageHandler(filters.Regex(".*پنل مدیریت.*"), admin_panel))
     app.add_handler(MessageHandler(filters.Regex("^📊 آمار کاربران$"), admin_stats))
     app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
 
