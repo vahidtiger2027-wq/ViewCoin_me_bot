@@ -152,13 +152,6 @@ def get_or_create_user(user_id, username="", referrer_id=0):
         u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
     return u
 
-def calculate_tickets(price):
-    packs = db_query("SELECT price, tickets FROM lottery_packs ORDER BY price DESC", fetchall=True)
-    for p_price, p_tickets in packs:
-        if price >= p_price:
-            return p_tickets
-    return 0
-
 # ----------------- SPONSOR CHECK -----------------
 async def check_sponsors(user_id, context):
     st = get_settings()
@@ -207,7 +200,7 @@ def admin_keyboard():
  WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
  WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(15)
 
-# ----------------- START & MESSAGES -----------------
+# ----------------- START -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -229,7 +222,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = get_settings()
     await update.message.reply_text(f"{st[10]}\n\nسلام {user.first_name} عزیز، خوش آمدید!", reply_markup=main_keyboard(user.id))
 
-# ----------------- LOTTERY ADMIN SETTINGS -----------------
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id in ADMIN_IDS:
+        await update.message.reply_text("⚙️ به پنل مدیریت خوش آمدید:", reply_markup=admin_keyboard())# ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
@@ -270,11 +265,10 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
 
         today_dt = datetime.date.today()
         end_dt = today_dt + datetime.timedelta(days=days)
-        
         today_str = today_dt.strftime("%Y/%m/%d")
         end_str = end_dt.strftime("%Y/%m/%d")
 
-        broadcast_msg = f"💰🎁قرعه کشی ربات از امروز ( {today_str} ) اغاز شد قرعه کشی در روز ( {end_str} ) انجام میشود برایه این که یکی از برندگان ما باشید در قرعه کشی ما شرکت کنید😍💰"
+        broadcast_msg = f"💰🎁قرعه کشی ربات از امروز ( {today_str} ) اغاز شد  قرعه کشی در روز  ( {end_str} ) انجام میشود برایه این که یکی از برندگان ما باشید در قرعه کشی ما  شرکت کنید😍💰"
 
         all_users = db_query("SELECT user_id FROM users", fetchall=True)
         for u in all_users:
@@ -283,7 +277,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
             except:
                 pass
         
-        await query.message.edit_text(f"✅ بازه {mode_str} انتخاب شد و پیام همگانی برای تمام کاربران ارسال گردید.")
+        await query.message.edit_text(f"✅ بازه {mode_str} انتخاب شد و پیام همگانی ارسال گردید.")
 
     elif data == "set_prizes_menu":
         ikb = InlineKeyboardMarkup([
@@ -309,7 +303,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
             ikb.append([InlineKeyboardButton(f"قیمت ( {p[1]:,} )   بیلیت  ( {p[2]} )", callback_data=f"edit_pack_{p[0]}")])
         await query.message.edit_text("⚙️ **کادرهای ۵ گانه تنظیم قیمت و بلیت:**\nجهت ویرایش روی هر کادر کلیک کنید:", reply_markup=InlineKeyboardMarkup(ikb), parse_mode="Markdown")
 
-# ----------------- PRIZE & TICKET CONVERSATIONS -----------------
+# ----------------- PRIZE & PACK INPUT HANDLERS -----------------
 async def start_prize_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -317,15 +311,11 @@ async def start_prize_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["prize_type"] = p_type
     rank = context.user_data.get("prize_rank")
 
-    if p_type == "both":
+    if p_type in ["both", "diamond"]:
         await query.message.reply_text(f"مقدار **الماس** برای نفر {rank} را وارد کنید:", parse_mode="Markdown")
-        return WAIT_LOTTERY_PRIZE_VAL1
-    elif p_type == "diamond":
-        await query.message.reply_text(f"مقدار **الماس** برای نفر {rank} را وارد کنید:", parse_mode="Markdown")
-        return WAIT_LOTTERY_PRIZE_VAL1
-    elif p_type == "coin":
+    else:
         await query.message.reply_text(f"مقدار **سکه** برای نفر {rank} را وارد کنید:", parse_mode="Markdown")
-        return WAIT_LOTTERY_PRIZE_VAL1
+    return WAIT_LOTTERY_PRIZE_VAL1
 
 async def receive_prize_val1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     val1 = update.message.text.strip()
@@ -347,13 +337,13 @@ async def receive_prize_val1(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     col_name = f"lottery_p{rank}"
     db_query(f"UPDATE bot_settings SET {col_name} = ? WHERE id = 1", (text_str,), commit=True)
-    await update.message.reply_text(f"✅ جایزه نفر {rank} با موفقیت تنظیم شد: **{text_str}**", parse_mode="Markdown", reply_markup=admin_keyboard())
+    await update.message.reply_text(f"✅ جایزه نفر {rank} تنظیم شد: **{text_str}**", parse_mode="Markdown")
     return ConversationHandler.END
 
 async def receive_prize_val2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     val2 = update.message.text.strip()
     if not val2.isdigit():
-        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای سکه وارد کنید:")
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید:")
         return WAIT_LOTTERY_PRIZE_VAL2
 
     diamond_val = context.user_data.get("temp_diamond")
@@ -362,7 +352,7 @@ async def receive_prize_val2(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     col_name = f"lottery_p{rank}"
     db_query(f"UPDATE bot_settings SET {col_name} = ? WHERE id = 1", (text_str,), commit=True)
-    await update.message.reply_text(f"✅ جایزه نفر {rank} با موفقیت تنظیم شد: **{text_str}**", parse_mode="Markdown", reply_markup=admin_keyboard())
+    await update.message.reply_text(f"✅ جایزه نفر {rank} تنظیم شد: **{text_str}**", parse_mode="Markdown")
     return ConversationHandler.END
 
 async def start_edit_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -376,7 +366,7 @@ async def start_edit_pack(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_pack_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     price = update.message.text.strip()
     if not price.isdigit():
-        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید:")
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید:")
         return WAIT_TICKET_PRICE
 
     context.user_data["temp_pack_price"] = int(price)
@@ -386,21 +376,40 @@ async def receive_pack_price(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def receive_pack_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tickets = update.message.text.strip()
     if not tickets.isdigit():
-        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای تعداد بلیت وارد کنید:")
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر وارد کنید:")
         return WAIT_TICKET_COUNT
 
     pack_id = context.user_data.get("edit_pack_id")
     price = context.user_data.get("temp_pack_price")
     
     db_query("UPDATE lottery_packs SET price = ?, tickets = ? WHERE id = ?", (price, int(tickets), pack_id), commit=True)
-    await update.message.reply_text(f"✅ کادر مربوطه با موفقیت به‌روزرسانی شد:\nقیمت: {price:,} تومان | بلیت: {tickets}", reply_markup=admin_keyboard())
+    await update.message.reply_text(f"✅ کادر به‌روزرسانی شد:\nقیمت: {price:,} تومان | بلیت: {tickets}")
     return ConversationHandler.END
 
-# ----------------- MAIN SERVER SETUP -----------------
+# ----------------- MAIN USER MENU HANDLERS -----------------
+async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
+    if not u:
+        return
+    msg = f"""📱 **شناسه کاربری:** `{u[0]}`
+💎 **تعداد الماس (عضویت):** {u[3]}
+🪙 **تعداد سکه (بازدید):** {u[2]}
+👥 **تعداد زیرمجموعه:** {u[4]}
+🎫 **تعداد بلیت قرعه‌کشی:** {u[12]}
+🎁 **جوایز گرفته شده از قرعه‌کشی:** {u[9]}
+💰 **پورسانت زیرمجموعه:** {u[10]}"""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
+
+# ----------------- MAIN APPLICATION STARTUP -----------------
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Conversation Handlers
     prize_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_prize_type, pattern="^p_type_")],
         states={
@@ -419,15 +428,20 @@ def main():
         fallbacks=[]
     )
 
+    # Command & Message Handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.Regex("^⚙ پنل مدیریت$"), admin_panel))
+    app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
+    app.add_handler(MessageHandler(filters.Regex("^💻حصاب کار بری مشحصات$"), user_profile))
+    app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
+    
+    # Callback Handlers
     app.add_handler(prize_conv)
     app.add_handler(pack_conv)
-
-    app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
     app.add_handler(CallbackQueryHandler(handle_lottery_admin_callbacks, pattern="^(lottery_|set_prizes_menu|prize_rank_|set_ticket_prices_menu)"))
 
-    logging.info("Starting Bot...")
-    app.run_polling(drop_pending_updates=True)
+    logging.info("Bot is running...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
