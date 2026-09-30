@@ -169,7 +169,7 @@ def main_keyboard(user_id):
         ["💎جم اوری سکه رایگان"],
         ["💻حصاب کار بری مشحصات", "👥جذب زیر مجموعه"],
         ["📥ثبت تبلیغ ویو گیر و ممبر گیر"],
-        ["👨‍💻🛍︎فروشگاه", "قرعه کشی"],
+        ["👨‍💻🛍︎︎فروشگاه", "قرعه کشی"],
         ["💰 انتقال سکه", "💎︎  انتقال الماس"]
     ]
     if user_id in ADMIN_IDS:
@@ -202,7 +202,8 @@ def admin_keyboard():
 
 # ----------------- CONVERSATION STATES -----------------
 (WAIT_VIEW_POST, WAIT_VIEW_CONFIRM, WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM, 
- WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD, WAIT_TRANSFER_COIN, WAIT_TRANSFER_DIAMOND) = range(8)
+ WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD, WAIT_TRANSFER_COIN, WAIT_TRANSFER_DIAMOND,
+ WAIT_DAILY_DIAMOND, WAIT_DAILY_COIN, WAIT_GATEWAY_URL) = range(11)
 
 # ----------------- START & MAIN MESSAGES -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -248,7 +249,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👤 **نام:** {user.first_name}
 🆔 **آیدی:** `{u[0]}`
 {username_line}
-🎟 **تعداد بلیت‌های قرعه‌کشی شما:** {u[12]}
+🎟 **تعداد بلیت‌های قرعه‌‌کشی شما:** {u[12]}
 🎁 **هدیه مدیریت:** {u[6]}
 👁 **بازدیدهای شما:** {u[7]}
 📅 **بازدیدهای امروز:** {u[8]}
@@ -359,6 +360,61 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💳 **آمار خرید (فروشگاه):** {tot_s:,} تومان"""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+# ----------------- ADMIN SETTINGS: DAILY GIFT & GATEWAY -----------------
+async def start_set_daily_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+    await update.message.reply_text("🎁 **تنظیم هدیه روزانه**\n\nلطفاً **مقدار الماس** هدیه روزانه را وارد کنید:")
+    return WAIT_DAILY_DIAMOND
+
+async def receive_daily_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای مقدار الماس وارد کنید:")
+        return WAIT_DAILY_DIAMOND
+    
+    context.user_data["new_daily_diamond"] = int(text)
+    await update.message.reply_text("حال لطفاً **مقدار سکه** هدیه روزانه را وارد کنید:")
+    return WAIT_DAILY_COIN
+
+async def receive_daily_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای مقدار سکه وارد کنید:")
+        return WAIT_DAILY_COIN
+    
+    diamond = context.user_data.get("new_daily_diamond")
+    coin = int(text)
+
+    db_query("UPDATE bot_settings SET daily_coin = ?, daily_diamond = ? WHERE id = 1", (coin, diamond), commit=True)
+    await update.message.reply_text(
+        f"✅ **هدیه روزانه با موفقیت تنظیم شد:**\n\n💎 **الماس:** {diamond}\n💰 **سکه:** {coin}",
+        parse_mode="Markdown", reply_markup=admin_keyboard()
+    )
+    return ConversationHandler.END
+
+async def start_set_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+    
+    st = get_settings()
+    await update.message.reply_text(
+        f"🔗 **تنظیم درگاه پرداخت**\n\n"
+        f"درگاه فعلی: `{st[2]}`\n\n"
+        f"لطفاً لینک و آیدی درگاه جدید را وارد کنید:",
+        parse_mode="Markdown"
+    )
+    return WAIT_GATEWAY_URL
+
+async def save_gateway_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_url = update.message.text.strip()
+    db_query("UPDATE bot_settings SET gateway_url = ? WHERE id = 1", (new_url,), commit=True)
+    await update.message.reply_text(
+        f"✅ درگاه پرداخت جدید با موفقیت ثبت شد:\n`{new_url}`",
+        parse_mode="Markdown", reply_markup=admin_keyboard()
+    )
+    return ConversationHandler.END
+
 # ----------------- COIN & DIAMOND TRANSFERS -----------------
 async def start_transfer_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💰 **انتقال سکه ویو**\n\nلطفاً شناسه عددی (User ID) و تعداد سکه را با یک فاصله بفرستید:\nمثال: `123456789 50`", parse_mode="Markdown")
@@ -426,7 +482,7 @@ async def process_transfer_diamond(update: Update, context: ContextTypes.DEFAULT
         pass
     return ConversationHandler.END
 
-# ----------------- ADMIN SETTINGS FUNCTIONS -----------------
+# ----------------- CARD SETTING FUNCTION -----------------
 async def start_set_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user.id not in ADMIN_IDS:
@@ -822,6 +878,23 @@ def main():
         fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
     )
 
+    daily_gift_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🎁 تنظیم هدیه روزانه$"), start_set_daily_gift)],
+        states={
+            WAIT_DAILY_DIAMOND: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_daily_diamond)],
+            WAIT_DAILY_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_daily_coin)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
+    )
+
+    gateway_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔗 تنظیم درگاه پرداخت$"), start_set_gateway)],
+        states={
+            WAIT_GATEWAY_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_gateway_url)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(view_conv)
     app.add_handler(member_conv)
@@ -829,6 +902,8 @@ def main():
     app.add_handler(card_conv)
     app.add_handler(transfer_coin_conv)
     app.add_handler(transfer_diamond_conv)
+    app.add_handler(daily_gift_conv)
+    app.add_handler(gateway_conv)
 
     app.add_handler(CallbackQueryHandler(handle_lottery_callbacks, pattern="^(lottery_|goto_shop)"))
     app.add_handler(CallbackQueryHandler(select_buy_package, pattern="^buy_"))
