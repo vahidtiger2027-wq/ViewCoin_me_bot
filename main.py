@@ -210,7 +210,8 @@ def admin_keyboard():
     WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
     WAIT_TICKET_PRICE, WAIT_TICKET_COUNT,
     WAIT_ORDER_LINK, WAIT_ORDER_COUNT
-) = range(18)# ----------------- USER HANDLERS -----------------
+) = range(18)
+# ----------------- USER HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -241,7 +242,7 @@ async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_T
         st = get_settings()
         await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{st[10]}", reply_markup=main_keyboard(user.id))
     else:
-        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌اید!", show_alert=True)
+        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌اید!", show_alert=True)
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
@@ -369,7 +370,7 @@ async def receive_transfer_coin_amt(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(f"✅ تعداد {amt:,} سکه با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
     try:
         await context.bot.send_message(chat_id=target_id, text=f"🎁 تعداد {amt:,} سکه از طرف کاربر `{sender_id}` به حساب شما واریز شد!", parse_mode="Markdown")
-    except:
+    except Exception:
         pass
     return ConversationHandler.END
 
@@ -413,7 +414,7 @@ async def receive_transfer_diamond_amt(update: Update, context: ContextTypes.DEF
     await update.message.reply_text(f"✅ تعداد {amt:,} الماس با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
     try:
         await context.bot.send_message(chat_id=target_id, text=f"🎁 تعداد {amt:,} الماس از طرف کاربر `{sender_id}` به حساب شما واریز شد!", parse_mode="Markdown")
-    except:
+    except Exception:
         pass
     return ConversationHandler.END
 
@@ -429,10 +430,11 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
-    await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")# ----------------- ADMIN SETTINGS & BROADCAST -----------------
+    await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
+    # ----------------- ADMIN SETTINGS & BROADCAST -----------------
 async def start_card_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        return
+        return ConversationHandler.END
     await update.message.reply_text("💳 لطفاً شماره کارت جدید را وارد کنید:")
     return WAIT_CARD_NUM
 
@@ -444,7 +446,7 @@ async def receive_card_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        return
+        return ConversationHandler.END
     await update.message.reply_text("🔗 لطفاً لینک درگاه پرداخت جدید را وارد کنید:")
     return WAIT_GATEWAY
 
@@ -456,7 +458,7 @@ async def receive_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_sponsors(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        return
+        return ConversationHandler.END
     await update.message.reply_text("🔒 لطفاً آیدی کانال‌های اسپانسر را با ویرگول انگلیسی (,) از هم جدا کرده و ارسال کنید:\nمثال: `@channel1, @channel2`")
     return WAIT_SPONSORS
 
@@ -468,7 +470,7 @@ async def receive_sponsors(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
-        return
+        return ConversationHandler.END
     await update.message.reply_text("📢 متن یا پیام همگانی خود را جهت ارسال به تمام کاربران وارد کنید:")
     return WAIT_BROADCAST
 
@@ -655,65 +657,69 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Conversation Handlers
+    # Filter for button presses to auto-cancel pending inputs
+    BTN_FILTER = filters.Regex("^(💳|🔗|🎁|👥|🎉|🔒|⏱|📢|📊|بازگشت|💎|💻|📥|👨‍💻|💰).*")
+
+    cancel_fallback = [MessageHandler(BTN_FILTER, back_to_main)]
+
     prize_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_prize_type, pattern="^p_type_")],
         states={
-            WAIT_LOTTERY_PRIZE_VAL1: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prize_val1)],
-            WAIT_LOTTERY_PRIZE_VAL2: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prize_val2)]
+            WAIT_LOTTERY_PRIZE_VAL1: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_prize_val1)],
+            WAIT_LOTTERY_PRIZE_VAL2: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_prize_val2)]
         },
-        fallbacks=[]
+        fallbacks=cancel_fallback
     )
 
     pack_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_edit_pack, pattern="^edit_pack_")],
         states={
-            WAIT_TICKET_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pack_price)],
-            WAIT_TICKET_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pack_count)]
+            WAIT_TICKET_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_pack_price)],
+            WAIT_TICKET_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_pack_count)]
         },
-        fallbacks=[]
+        fallbacks=cancel_fallback
     )
 
     transfer_coin_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(".*انتقال سکه.*"), start_transfer_coin)],
         states={
-            WAIT_TRANSFER_COIN_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_coin_id)],
-            WAIT_TRANSFER_COIN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_coin_amt)]
+            WAIT_TRANSFER_COIN_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_transfer_coin_id)],
+            WAIT_TRANSFER_COIN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_transfer_coin_amt)]
         },
-        fallbacks=[]
+        fallbacks=cancel_fallback
     )
 
     transfer_diamond_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(".*انتقال الماس.*"), start_transfer_diamond)],
         states={
-            WAIT_TRANSFER_DIAMOND_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_diamond_id)],
-            WAIT_TRANSFER_DIAMOND_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_diamond_amt)]
+            WAIT_TRANSFER_DIAMOND_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_transfer_diamond_id)],
+            WAIT_TRANSFER_DIAMOND_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_transfer_diamond_amt)]
         },
-        fallbacks=[]
+        fallbacks=cancel_fallback
     )
 
     card_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^💳 تنظیم شماره کارت$"), start_card_num)],
-        states={WAIT_CARD_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_card_num)]},
-        fallbacks=[]
+        entry_points=[MessageHandler(filters.Regex(".*تنظیم شماره کارت.*"), start_card_num)],
+        states={WAIT_CARD_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_card_num)]},
+        fallbacks=cancel_fallback
     )
 
     gateway_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🔗 تنظیم درگاه پرداخت$"), start_gateway)],
-        states={WAIT_GATEWAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_gateway)]},
-        fallbacks=[]
+        entry_points=[MessageHandler(filters.Regex(".*تنظیم درگاه پرداخت.*"), start_gateway)],
+        states={WAIT_GATEWAY: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_gateway)]},
+        fallbacks=cancel_fallback
     )
 
     sponsors_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🔒 تنظیم اسپانسر$"), start_sponsors)],
-        states={WAIT_SPONSORS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sponsors)]},
-        fallbacks=[]
+        entry_points=[MessageHandler(filters.Regex(".*تنظیم اسپانسر.*"), start_sponsors)],
+        states={WAIT_SPONSORS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_sponsors)]},
+        fallbacks=cancel_fallback
     )
 
     broadcast_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📢 ارسال پیام همگانی$"), start_broadcast)],
-        states={WAIT_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_broadcast)]},
-        fallbacks=[]
+        entry_points=[MessageHandler(filters.Regex(".*ارسال پیام همگانی.*"), start_broadcast)],
+        states={WAIT_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_broadcast)]},
+        fallbacks=cancel_fallback
     )
 
     # Commands
@@ -730,8 +736,8 @@ def main():
 
     # Admin Buttons
     app.add_handler(MessageHandler(filters.Regex(".*پنل مدیریت.*"), admin_panel))
-    app.add_handler(MessageHandler(filters.Regex("^📊 آمار کاربران$"), admin_stats))
-    app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
+    app.add_handler(MessageHandler(filters.Regex(".*آمار کاربران.*"), admin_stats))
+    app.add_handler(MessageHandler(filters.Regex(".*تنظیمات جوایز قرعه‌کشی.*"), lottery_settings_menu))
 
     # Add Conversations
     app.add_handler(prize_conv)
