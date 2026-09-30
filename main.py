@@ -14,7 +14,7 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 PORT = int(os.environ.get("PORT", 10000))
 
-# آیدی‌های ادمین (میتوانید آیدی‌های دیگر را هم اضافه کنید)
+# آیدی‌های عددی ادمین
 ADMIN_IDS = [5412332176]
 
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +39,7 @@ DB_FILE = "bot_database.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -55,6 +56,13 @@ def init_db():
         tickets INTEGER DEFAULT 0,
         total_spent INTEGER DEFAULT 0,
         is_left INTEGER DEFAULT 0
+    )''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS user_clicks (
+        user_id INTEGER,
+        target_id TEXT,
+        click_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, target_id)
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS bot_settings (
@@ -85,6 +93,16 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         price INTEGER,
         tickets INTEGER
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS orders (
+        order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        order_type TEXT,
+        target_link TEXT,
+        amount INTEGER,
+        remains INTEGER,
+        status TEXT DEFAULT 'active'
     )''')
     
     c.execute("INSERT OR IGNORE INTO bot_settings (id) VALUES (1)")
@@ -184,10 +202,15 @@ def admin_keyboard():
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 # ----------------- CONVERSATION STATES -----------------
-(WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
- WAIT_TICKET_PRICE, WAIT_TICKET_COUNT) = range(4)
-
-# ----------------- USER HANDLERS -----------------
+(
+    WAIT_CARD_NUM, WAIT_GATEWAY, WAIT_DAILY_C, WAIT_DAILY_D, 
+    WAIT_REF_C, WAIT_REF_D, WAIT_BROADCAST, WAIT_SPONSORS,
+    WAIT_TRANSFER_COIN_ID, WAIT_TRANSFER_COIN_AMT,
+    WAIT_TRANSFER_DIAMOND_ID, WAIT_TRANSFER_DIAMOND_AMT,
+    WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
+    WAIT_TICKET_PRICE, WAIT_TICKET_COUNT,
+    WAIT_ORDER_LINK, WAIT_ORDER_COUNT
+) = range(18)# ----------------- USER HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
@@ -218,7 +241,7 @@ async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_T
         st = get_settings()
         await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{st[10]}", reply_markup=main_keyboard(user.id))
     else:
-        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌‌‌اید!", show_alert=True)
+        await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌اید!", show_alert=True)
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
@@ -227,12 +250,12 @@ async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = f"""💻 **حساب کاربری شما:**
 
 🆔 **شناسه عددی:** `{u[0]}`
-🪙 **سکه بازدید:** {u[2]}
-💎 **الماس ممبر:** {u[3]}
-👥 **تعداد زیرمجموعه:** {u[4]}
-🎫 **تعداد بلیت قرعه‌کشی:** {u[12]}
-🎁 **جوایز قرعه‌کشی برنده شده:** {u[9]}
-💰 **پورسانت زیرمجموعه:** {u[10]}"""
+🪙 **سکه بازدید:** {u[2]:,}
+💎 **الماس ممبر:** {u[3]:,}
+👥 **تعداد زیرمجموعه:** {u[4]:,}
+🎫 **تعداد بلیت قرعه‌کشی:** {u[12]:,}
+🎁 **جوایز قرعه‌‌کشی برنده شده:** {u[9]}
+💰 **پورسانت زیرمجموعه:** {u[10]:,}"""
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def get_free_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -247,7 +270,7 @@ async def get_free_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db_query("UPDATE users SET coin_view = coin_view + ?, coin_member = coin_member + ?, last_daily = ? WHERE user_id = ?",
              (st[3], st[4], today_str, user_id), commit=True)
-    await update.message.reply_text(f"🎁 هدیه روزانه شما شامل {st[3]} سکه و {st[4]} الماس با موفقیت واریز شد!")
+    await update.message.reply_text(f"🎁 هدیه روزانه شما شامل **{st[3]} سکه** و **{st[4]} الماس** با موفقیت واریز شد!", parse_mode="Markdown")
 
 async def ref_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_info = await context.bot.get_me()
@@ -295,17 +318,104 @@ async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🎫 **تعداد بلیت‌های شما:** {u[12]}
 
-شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌کشی دریافت می‌کنید!"""
+شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌‌کشی دریافت می‌کنید!"""
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def ads_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📥 لطفاً نوع تبلیغ خود را انتخاب کنید (ویوگیر یا ممبرگیر):")
+    ikb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👁 ثبت سفارش بازدید (ویو)", callback_data="order_view")],
+        [InlineKeyboardButton("👤 ثبت سفارش ممبر", callback_data="order_member")]
+    ])
+    await update.message.reply_text("📥 لطفاً نوع خدمات مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
-async def transfer_coin_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💰 لطفاً آیدی عددی فردی که می‌خواهید سکه منتقل کنید را وارد کنید:")
+# ----------------- COIN & DIAMOND TRANSFER HANDLERS -----------------
+async def start_transfer_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💰 لطفاً **شناسه عددی (ID)** فرد مقصد جهت انتقال سکه را وارد کنید:")
+    return WAIT_TRANSFER_COIN_ID
 
-async def transfer_diamond_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💎 لطفاً آیدی عددی فردی که می‌خواهید الماس منتقل کنید را وارد کنید:")
+async def receive_transfer_coin_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target_id = update.message.text.strip()
+    if not target_id.isdigit():
+        await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر وارد کنید:")
+        return WAIT_TRANSFER_COIN_ID
+    
+    target_user = db_query("SELECT user_id FROM users WHERE user_id=?", (int(target_id),), fetchone=True)
+    if not target_user:
+        await update.message.reply_text("❌ کاربر مورد نظر در ربات یافت نشد! دوباره تلاش کنید:")
+        return WAIT_TRANSFER_COIN_ID
+        
+    context.user_data["transfer_target"] = int(target_id)
+    await update.message.reply_text("تعداد **سکه** جهت انتقال را وارد کنید:")
+    return WAIT_TRANSFER_COIN_AMT
+
+async def receive_transfer_coin_amt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amt_str = update.message.text.strip()
+    if not amt_str.isdigit() or int(amt_str) <= 0:
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر و بزرگتر از ۰ وارد کنید:")
+        return WAIT_TRANSFER_COIN_AMT
+        
+    amt = int(amt_str)
+    sender_id = update.effective_user.id
+    target_id = context.user_data.get("transfer_target")
+    
+    sender = db_query("SELECT coin_view FROM users WHERE user_id=?", (sender_id,), fetchone=True)
+    if sender[0] < amt:
+        await update.message.reply_text(f"❌ موجودی سکه شما کافی نیست! موجودی فعلی: {sender[0]:,} سکه")
+        return ConversationHandler.END
+        
+    db_query("UPDATE users SET coin_view = coin_view - ? WHERE user_id = ?", (amt, sender_id), commit=True)
+    db_query("UPDATE users SET coin_view = coin_view + ? WHERE user_id = ?", (amt, target_id), commit=True)
+    
+    await update.message.reply_text(f"✅ تعداد {amt:,} سکه با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
+    try:
+        await context.bot.send_message(chat_id=target_id, text=f"🎁 تعداد {amt:,} سکه از طرف کاربر `{sender_id}` به حساب شما واریز شد!", parse_mode="Markdown")
+    except:
+        pass
+    return ConversationHandler.END
+
+async def start_transfer_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💎 لطفاً **شناسه عددی (ID)** فرد مقصد جهت انتقال الماس را وارد کنید:")
+    return WAIT_TRANSFER_DIAMOND_ID
+
+async def receive_transfer_diamond_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    target_id = update.message.text.strip()
+    if not target_id.isdigit():
+        await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر وارد کنید:")
+        return WAIT_TRANSFER_DIAMOND_ID
+    
+    target_user = db_query("SELECT user_id FROM users WHERE user_id=?", (int(target_id),), fetchone=True)
+    if not target_user:
+        await update.message.reply_text("❌ کاربر مورد نظر در ربات یافت نشد! دوباره تلاش کنید:")
+        return WAIT_TRANSFER_DIAMOND_ID
+        
+    context.user_data["transfer_target"] = int(target_id)
+    await update.message.reply_text("تعداد **الماس** جهت انتقال را وارد کنید:")
+    return WAIT_TRANSFER_DIAMOND_AMT
+
+async def receive_transfer_diamond_amt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    amt_str = update.message.text.strip()
+    if not amt_str.isdigit() or int(amt_str) <= 0:
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر و بزرگتر از ۰ وارد کنید:")
+        return WAIT_TRANSFER_DIAMOND_AMT
+        
+    amt = int(amt_str)
+    sender_id = update.effective_user.id
+    target_id = context.user_data.get("transfer_target")
+    
+    sender = db_query("SELECT coin_member FROM users WHERE user_id=?", (sender_id,), fetchone=True)
+    if sender[0] < amt:
+        await update.message.reply_text(f"❌ موجودی الماس شما کافی نیست! موجودی فعلی: {sender[0]:,} الماس")
+        return ConversationHandler.END
+        
+    db_query("UPDATE users SET coin_member = coin_member - ? WHERE user_id = ?", (amt, sender_id), commit=True)
+    db_query("UPDATE users SET coin_member = coin_member + ? WHERE user_id = ?", (amt, target_id), commit=True)
+    
+    await update.message.reply_text(f"✅ تعداد {amt:,} الماس با موفقیت به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
+    try:
+        await context.bot.send_message(chat_id=target_id, text=f"🎁 تعداد {amt:,} الماس از طرف کاربر `{sender_id}` به حساب شما واریز شد!", parse_mode="Markdown")
+    except:
+        pass
+    return ConversationHandler.END
 
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
@@ -319,7 +429,64 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
-    await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
+    await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")# ----------------- ADMIN SETTINGS & BROADCAST -----------------
+async def start_card_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    await update.message.reply_text("💳 لطفاً شماره کارت جدید را وارد کنید:")
+    return WAIT_CARD_NUM
+
+async def receive_card_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    card = update.message.text.strip()
+    db_query("UPDATE bot_settings SET card_number = ? WHERE id = 1", (card,), commit=True)
+    await update.message.reply_text(f"✅ شماره کارت با موفقیت به‌روزرسانی شد:\n`{card}`", parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def start_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    await update.message.reply_text("🔗 لطفاً لینک درگاه پرداخت جدید را وارد کنید:")
+    return WAIT_GATEWAY
+
+async def receive_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    gw = update.message.text.strip()
+    db_query("UPDATE bot_settings SET gateway_url = ? WHERE id = 1", (gw,), commit=True)
+    await update.message.reply_text(f"✅ لینک درگاه با موفقیت به‌روزرسانی شد:\n{gw}")
+    return ConversationHandler.END
+
+async def start_sponsors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    await update.message.reply_text("🔒 لطفاً آیدی کانال‌های اسپانسر را با ویرگول انگلیسی (,) از هم جدا کرده و ارسال کنید:\nمثال: `@channel1, @channel2`")
+    return WAIT_SPONSORS
+
+async def receive_sponsors(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sps = update.message.text.strip()
+    db_query("UPDATE bot_settings SET sponsors = ? WHERE id = 1", (sps,), commit=True)
+    await update.message.reply_text(f"✅ کانال‌های اسپانسر با موفقیت تنظیم شدند:\n{sps}")
+    return ConversationHandler.END
+
+async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    await update.message.reply_text("📢 متن یا پیام همگانی خود را جهت ارسال به تمام کاربران وارد کنید:")
+    return WAIT_BROADCAST
+
+async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg_text = update.message.text
+    all_users = db_query("SELECT user_id FROM users", fetchall=True)
+    success = 0
+    
+    for u in all_users:
+        try:
+            await context.bot.send_message(chat_id=u[0], text=msg_text)
+            success += 1
+        except Exception:
+            pass
+            
+    await update.message.reply_text(f"✅ پیام همگانی با موفقیت به **{success}** کاربر ارسال شد.", parse_mode="Markdown")
+    return ConversationHandler.END
+
 # ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -370,7 +537,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
         for u in all_users:
             try:
                 await context.bot.send_message(chat_id=u[0], text=broadcast_msg)
-            except:
+            except Exception:
                 pass
         
         await query.message.edit_text(f"✅ بازه {mode_str} انتخاب شد و پیام همگانی ارسال گردید.")
@@ -507,6 +674,48 @@ def main():
         fallbacks=[]
     )
 
+    transfer_coin_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex(".*انتقال سکه.*"), start_transfer_coin)],
+        states={
+            WAIT_TRANSFER_COIN_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_coin_id)],
+            WAIT_TRANSFER_COIN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_coin_amt)]
+        },
+        fallbacks=[]
+    )
+
+    transfer_diamond_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex(".*انتقال الماس.*"), start_transfer_diamond)],
+        states={
+            WAIT_TRANSFER_DIAMOND_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_diamond_id)],
+            WAIT_TRANSFER_DIAMOND_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_transfer_diamond_amt)]
+        },
+        fallbacks=[]
+    )
+
+    card_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💳 تنظیم شماره کارت$"), start_card_num)],
+        states={WAIT_CARD_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_card_num)]},
+        fallbacks=[]
+    )
+
+    gateway_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔗 تنظیم درگاه پرداخت$"), start_gateway)],
+        states={WAIT_GATEWAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_gateway)]},
+        fallbacks=[]
+    )
+
+    sponsors_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔒 تنظیم اسپانسر$"), start_sponsors)],
+        states={WAIT_SPONSORS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_sponsors)]},
+        fallbacks=[]
+    )
+
+    broadcast_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📢 ارسال پیام همگانی$"), start_broadcast)],
+        states={WAIT_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_broadcast)]},
+        fallbacks=[]
+    )
+
     # Commands
     app.add_handler(CommandHandler("start", start))
 
@@ -517,8 +726,6 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(".*ثبت تبلیغ ویو گیر و ممبر گیر.*"), ads_menu))
     app.add_handler(MessageHandler(filters.Regex(".*فروشگاه.*"), shop_menu))
     app.add_handler(MessageHandler(filters.Regex(".*قرعه کشی.*"), lottery_user_menu))
-    app.add_handler(MessageHandler(filters.Regex(".*انتقال سکه.*"), transfer_coin_prompt))
-    app.add_handler(MessageHandler(filters.Regex(".*انتقال الماس.*"), transfer_diamond_prompt))
     app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
 
     # Admin Buttons
@@ -526,9 +733,17 @@ def main():
     app.add_handler(MessageHandler(filters.Regex("^📊 آمار کاربران$"), admin_stats))
     app.add_handler(MessageHandler(filters.Regex("^🎉 تنظیمات جوایز قرعه‌کشی$"), lottery_settings_menu))
 
-    # Callback Query Handlers
+    # Add Conversations
     app.add_handler(prize_conv)
     app.add_handler(pack_conv)
+    app.add_handler(transfer_coin_conv)
+    app.add_handler(transfer_diamond_conv)
+    app.add_handler(card_conv)
+    app.add_handler(gateway_conv)
+    app.add_handler(sponsors_conv)
+    app.add_handler(broadcast_conv)
+
+    # Callback Query Handlers
     app.add_handler(CallbackQueryHandler(check_sponsor_callback, pattern="^check_sponsor_again$"))
     app.add_handler(CallbackQueryHandler(handle_lottery_admin_callbacks, pattern="^(lottery_|set_prizes_menu|prize_rank_|set_ticket_prices_menu)"))
 
