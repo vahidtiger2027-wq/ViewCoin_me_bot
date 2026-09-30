@@ -13,9 +13,11 @@ from telegram.ext import (
 # ----------------- CONFIGURATION -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
 PORT = int(os.environ.get("PORT", 10000))
+ADMIN_ID = 5412332176
+ADMIN_IDS = [ADMIN_ID]
 
-# آیدی‌های عددی ادمین
-ADMIN_IDS = [5412332176]
+VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
+MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,7 +41,6 @@ DB_FILE = "bot_database.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -81,9 +82,9 @@ def init_db():
         unsub_penalty INTEGER DEFAULT 2,
         lottery_active INTEGER DEFAULT 1,
         lottery_mode TEXT DEFAULT 'هفتگی',
-        lottery_p1 TEXT DEFAULT '0 الماس و 0 سکه',
-        lottery_p2 TEXT DEFAULT '0 الماس و 0 سکه',
-        lottery_p3 TEXT DEFAULT '0 الماس و 0 سکه',
+        lottery_p1 TEXT DEFAULT '0 الماس ممبرگیر',
+        lottery_p2 TEXT DEFAULT '0 سکه ویوگیر',
+        lottery_p3 TEXT DEFAULT '0 سکه ویوگیر',
         winner_1 TEXT DEFAULT '',
         winner_2 TEXT DEFAULT '',
         winner_3 TEXT DEFAULT ''
@@ -94,19 +95,10 @@ def init_db():
         price INTEGER,
         tickets INTEGER
     )''')
-
-    c.execute('''CREATE TABLE IF NOT EXISTS orders (
-        order_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        order_type TEXT,
-        target_link TEXT,
-        amount INTEGER,
-        remains INTEGER,
-        status TEXT DEFAULT 'active'
-    )''')
     
     c.execute("INSERT OR IGNORE INTO bot_settings (id) VALUES (1)")
-    
+
+    # ایجاد پک‌های پیش‌فرض قرعه‌کشی در صورت خالی بودن
     c.execute("SELECT COUNT(*) FROM lottery_packs")
     if c.fetchone()[0] == 0:
         default_packs = [
@@ -144,7 +136,8 @@ def get_or_create_user(user_id, username="", referrer_id=0):
     u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
     if not u:
         st = get_settings()
-        ref_c, ref_d = st[5], st[6]
+        ref_c = st[5]
+        ref_d = st[6]
         
         db_query("""INSERT INTO users 
             (user_id, username, coin_view, coin_member, ref_count, last_daily, admin_gift, total_views, today_views, lottery_wins, ref_commission, referrer_id, tickets, total_spent, is_left) 
@@ -181,36 +174,35 @@ async def check_sponsors(user_id, context):
 # ----------------- KEYBOARDS -----------------
 def main_keyboard(user_id):
     kb = [
-        ["💎جم اوری سکه رایگان"],
-        ["💻حساب کار بری مشخصات", "👥جذب زیر مجموعه"],
-        ["📥ثبت تبلیغ ویو گیر و ممبر گیر"],
-        ["👨‍💻🛍فروشگاه", "قرعه کشی"],
-        ["💰انتقال سکه", "💎انتقال الماس"]
+        ["💎 جم اوری سکه رایگان"],
+        ["💻 حساب کاربری مشخصات", "👥 جذب زیر مجموعه"],
+        ["📥 ثبت تبلیغ ویو گیر و ممبر گیر"],
+        ["👨‍💻🛍 فروشگاه", "🎉 قرعه کشی"],
+        ["💰 انتقال سکه", "💎 انتقال الماس"]
     ]
     if user_id in ADMIN_IDS:
-        kb.append(["⚙️ پنل مدیریت"])
+        kb.append(["⚙ پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def admin_keyboard():
     kb = [
         ["📊 آمار کاربران", "💳 تنظیم شماره کارت"],
         ["🔗 تنظیم درگاه پرداخت", "🎁 تنظیم هدیه روزانه"],
-        ["👥 تنظیم زیرمجموعه", "🎉 تنظیمات جوایز قرعه‌کشی"],
-        ["🔒 تنظیم اسپانسر", "⏱ تنظیم روز ماندگاری (ضد لفت)"],
+        ["🔒 تنظیم اسپانسر", "🎉 تنظیمات جوایز قرعه‌کشی"],
         ["📢 ارسال پیام همگانی", "بازگشت به منوی اصلی"]
     ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 # ----------------- CONVERSATION STATES -----------------
 (
-    WAIT_CARD_NUM, WAIT_GATEWAY, WAIT_DAILY_C, WAIT_DAILY_D, 
-    WAIT_REF_C, WAIT_REF_D, WAIT_BROADCAST, WAIT_SPONSORS,
     WAIT_TRANSFER_COIN_ID, WAIT_TRANSFER_COIN_AMT,
     WAIT_TRANSFER_DIAMOND_ID, WAIT_TRANSFER_DIAMOND_AMT,
+    WAIT_CARD_NUM, WAIT_GATEWAY, WAIT_SPONSORS, WAIT_BROADCAST,
+    WAIT_DAILY_DIAMOND, WAIT_DAILY_COIN,
     WAIT_LOTTERY_PRIZE_VAL1, WAIT_LOTTERY_PRIZE_VAL2,
-    WAIT_TICKET_PRICE, WAIT_TICKET_COUNT,
-    WAIT_ORDER_LINK, WAIT_ORDER_COUNT
-) = range(18)
+    WAIT_TICKET_PRICE, WAIT_TICKET_COUNT
+) = range(14)
+
 # ----------------- USER HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -431,7 +423,8 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
     await update.message.reply_text(f"📊 **آمار ربات:**\n\n👥 کل کاربران: **{total_users}** نفر", parse_mode="Markdown")
-    # ----------------- ADMIN SETTINGS & BROADCAST -----------------
+
+# ----------------- ADMIN SETTINGS & BROADCAST -----------------
 async def start_card_num(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return ConversationHandler.END
@@ -489,6 +482,38 @@ async def receive_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ پیام همگانی با موفقیت به **{success}** کاربر ارسال شد.", parse_mode="Markdown")
     return ConversationHandler.END
 
+async def start_set_daily_gift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+    await update.message.reply_text("🎁 **تنظیم هدیه روزانه**\n\nلطفاً **مقدار الماس** هدیه روزانه را وارد کنید:")
+    return WAIT_DAILY_DIAMOND
+
+async def receive_daily_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای مقدار الماس وارد کنید:")
+        return WAIT_DAILY_DIAMOND
+    
+    context.user_data["new_daily_diamond"] = int(text)
+    await update.message.reply_text("حال لطفاً **مقدار سکه** هدیه روزانه را وارد کنید:")
+    return WAIT_DAILY_COIN
+
+async def receive_daily_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    if not text.isdigit():
+        await update.message.reply_text("❌ لطفاً یک عدد معتبر برای مقدار سکه وارد کنید:")
+        return WAIT_DAILY_COIN
+    
+    diamond = context.user_data.get("new_daily_diamond")
+    coin = int(text)
+
+    db_query("UPDATE bot_settings SET daily_coin = ?, daily_diamond = ? WHERE id = 1", (coin, diamond), commit=True)
+    await update.message.reply_text(
+        f"✅ **هدیه روزانه با موفقیت تنظیم شد:**\n\n💎 **الماس:** {diamond}\n💰 **سکه:** {coin}",
+        parse_mode="Markdown", reply_markup=admin_keyboard()
+    )
+    return ConversationHandler.END
+
 # ----------------- LOTTERY ADMIN SETTINGS -----------------
 async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -520,7 +545,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
     if data in ["lottery_on", "lottery_off"]:
         is_active = 1 if data == "lottery_on" else 0
         db_query("UPDATE bot_settings SET lottery_active = ? WHERE id = 1", (is_active,), commit=True)
-        txt = "✅ قرعه‌کشی روشن شد." if is_active else "🔴 قرعه‌کشی خاموش شد."
+        txt = "✅ قرعه‌‌کشی روشن شد." if is_active else "🔴 قرعه‌کشی خاموش شد."
         await query.message.edit_text(txt)
 
     elif data.startswith("lottery_period_"):
@@ -533,7 +558,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
         today_str = today_dt.strftime("%Y/%m/%d")
         end_str = end_dt.strftime("%Y/%m/%d")
 
-        broadcast_msg = f"💰🎁قرعه کشی ربات از امروز ( {today_str} ) اغاز شد  قرعه کشی در روز  ( {end_str} ) انجام میشود برایه این که یکی از برندگان ما باشید در قرعه کشی ما  شرکت کنید😍💰"
+        broadcast_msg = f"💰🎁 قرعه کشی ربات از امروز ( {today_str} ) آغاز شد. قرعه کشی در روز ( {end_str} ) انجام می‌شود. برای اینکه یکی از برندگان ما باشید در قرعه کشی ما شرکت کنید!😍💰"
 
         all_users = db_query("SELECT user_id FROM users", fetchall=True)
         for u in all_users:
@@ -565,7 +590,7 @@ async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.D
         packs = db_query("SELECT id, price, tickets FROM lottery_packs ORDER BY id ASC", fetchall=True)
         ikb = []
         for p in packs:
-            ikb.append([InlineKeyboardButton(f"قیمت ( {p[1]:,} )   بیلیت  ( {p[2]} )", callback_data=f"edit_pack_{p[0]}")])
+            ikb.append([InlineKeyboardButton(f"قیمت ( {p[1]:,} )  بیلیت ( {p[2]} )", callback_data=f"edit_pack_{p[0]}")])
         await query.message.edit_text("⚙️ **کادرهای ۵ گانه تنظیم قیمت و بلیت:**\nجهت ویرایش روی هر کادر کلیک کنید:", reply_markup=InlineKeyboardMarkup(ikb), parse_mode="Markdown")
 
 # ----------------- PRIZE & PACK CONVERSATION HANDLERS -----------------
@@ -698,6 +723,15 @@ def main():
         fallbacks=cancel_fallback
     )
 
+    daily_gift_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex(".*تنظیم هدیه روزانه.*"), start_set_daily_gift)],
+        states={
+            WAIT_DAILY_DIAMOND: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_daily_diamond)],
+            WAIT_DAILY_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_daily_coin)]
+        },
+        fallbacks=cancel_fallback
+    )
+
     card_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(".*تنظیم شماره کارت.*"), start_card_num)],
         states={WAIT_CARD_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, receive_card_num)]},
@@ -726,8 +760,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
 
     # User Buttons
-    app.add_handler(MessageHandler(filters.Regex(".*حساب کار بری مشخصات.*"), user_profile))
     app.add_handler(MessageHandler(filters.Regex(".*جم اوری سکه رایگان.*"), get_free_coins))
+    app.add_handler(MessageHandler(filters.Regex(".*حساب کاربری مشخصات.*"), user_profile))
     app.add_handler(MessageHandler(filters.Regex(".*جذب زیر مجموعه.*"), ref_link))
     app.add_handler(MessageHandler(filters.Regex(".*ثبت تبلیغ ویو گیر و ممبر گیر.*"), ads_menu))
     app.add_handler(MessageHandler(filters.Regex(".*فروشگاه.*"), shop_menu))
@@ -744,6 +778,7 @@ def main():
     app.add_handler(pack_conv)
     app.add_handler(transfer_coin_conv)
     app.add_handler(transfer_diamond_conv)
+    app.add_handler(daily_gift_conv)
     app.add_handler(card_conv)
     app.add_handler(gateway_conv)
     app.add_handler(sponsors_conv)
@@ -754,7 +789,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_lottery_admin_callbacks, pattern="^(lottery_|set_prizes_menu|prize_rank_|set_ticket_prices_menu)"))
 
     logging.info("Bot is running...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
