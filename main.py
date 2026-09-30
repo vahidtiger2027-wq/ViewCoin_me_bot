@@ -47,7 +47,7 @@ def init_db():
         coin_view INTEGER DEFAULT 0,
         coin_member INTEGER DEFAULT 0,
         ref_count INTEGER DEFAULT 0,
-        last_daily TEXT,
+        last_daily TEXT DEFAULT '',
         admin_gift INTEGER DEFAULT 0,
         total_views INTEGER DEFAULT 0,
         today_views INTEGER DEFAULT 0,
@@ -98,7 +98,12 @@ def init_db():
     
     c.execute("INSERT OR IGNORE INTO bot_settings (id) VALUES (1)")
 
-    # ایجاد پک‌های پیش‌فرض قرعه‌کشی در صورت خالی بودن
+    # چک کردن ستون‌های جدول برای کاربران قدیمی
+    c.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in c.fetchall()]
+    if "tickets" not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN tickets INTEGER DEFAULT 0")
+
     c.execute("SELECT COUNT(*) FROM lottery_packs")
     if c.fetchone()[0] == 0:
         default_packs = [
@@ -136,8 +141,8 @@ def get_or_create_user(user_id, username="", referrer_id=0):
     u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
     if not u:
         st = get_settings()
-        ref_c = st[5]
-        ref_d = st[6]
+        ref_c = st[5] if st else 200
+        ref_d = st[6] if st else 50
         
         db_query("""INSERT INTO users 
             (user_id, username, coin_view, coin_member, ref_count, last_daily, admin_gift, total_views, today_views, lottery_wins, ref_commission, referrer_id, tickets, total_spent, is_left) 
@@ -156,7 +161,7 @@ def get_or_create_user(user_id, username="", referrer_id=0):
 # ----------------- SPONSOR CHECK -----------------
 async def check_sponsors(user_id, context):
     st = get_settings()
-    sponsors_str = st[9]
+    sponsors_str = st[9] if st else ""
     if not sponsors_str:
         return True
     
@@ -223,7 +228,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     st = get_settings()
-    await update.message.reply_text(f"{st[10]}\n\nسلام {user.first_name} عزیز، خوش آمدید!", reply_markup=main_keyboard(user.id))
+    welcome = st[10] if st else "خوش آمدید"
+    await update.message.reply_text(f"{welcome}\n\nسلام {user.first_name} عزیز، خوش آمدید!", reply_markup=main_keyboard(user.id))
 
 async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -232,28 +238,30 @@ async def check_sponsor_callback(update: Update, context: ContextTypes.DEFAULT_T
     if await check_sponsors(user.id, context):
         await query.message.delete()
         st = get_settings()
-        await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{st[10]}", reply_markup=main_keyboard(user.id))
+        welcome = st[10] if st else "خوش آمدید"
+        await context.bot.send_message(chat_id=user.id, text=f"✅ عضویت شما تایید شد!\n\n{welcome}", reply_markup=main_keyboard(user.id))
     else:
         await query.answer("❌ شما هنوز در همه کانال‌ها عضو نشده‌‌اید!", show_alert=True)
 
 async def user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
+    u = get_or_create_user(update.effective_user.id)
     if not u:
         return
+    tickets = u[12] if len(u) > 12 and u[12] is not None else 0
     msg = f"""💻 **حساب کاربری شما:**
 
 🆔 **شناسه عددی:** `{u[0]}`
 🪙 **سکه بازدید:** {u[2]:,}
 💎 **الماس ممبر:** {u[3]:,}
 👥 **تعداد زیرمجموعه:** {u[4]:,}
-🎫 **تعداد بلیت قرعه‌کشی:** {u[12]:,}
+🎫 **تعداد بلیت قرعه‌کشی:** {tickets:,}
 🎁 **جوایز قرعه‌‌کشی برنده شده:** {u[9]}
 💰 **پورسانت زیرمجموعه:** {u[10]:,}"""
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def get_free_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    u = db_query("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
+    u = get_or_create_user(user_id)
     st = get_settings()
     
     today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -296,20 +304,27 @@ async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     st = get_settings()
-    u = db_query("SELECT * FROM users WHERE user_id=?", (update.effective_user.id,), fetchone=True)
-    status_str = "🟢 فعال" if st[13] else "🔴 غیرفعال"
+    u = get_or_create_user(update.effective_user.id)
+    
+    status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
+    mode_str = st[14] if st else "هفتگی"
+    p1 = st[15] if st else "نامشخص"
+    p2 = st[16] if st else "نامشخص"
+    p3 = st[17] if st else "نامشخص"
+    
+    tickets = u[12] if len(u) > 12 and u[12] is not None else 0
     
     msg = f"""🎉 **قرعه‌کشی بزرگ ربات**
 
 📌 **وضعیت:** {status_str}
-📅 **بازه برگزاری:** {st[14]}
+📅 **بازه برگزاری:** {mode_str}
 
 🎁 **جوایز این دوره:**
-🥇 **نفر اول:** {st[15]}
-🥈 **نفر دوم:** {st[16]}
-🥉 **نفر سوم:** {st[17]}
+🥇 **نفر اول:** {p1}
+🥈 **نفر دوم:** {p2}
+🥉 **نفر سوم:** {p3}
 
-🎫 **تعداد بلیت‌های شما:** {u[12]}
+🎫 **تعداد بلیت‌های شما:** {tickets:,}
 
 شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌‌کشی دریافت می‌کنید!"""
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -519,7 +534,8 @@ async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
     if update.effective_user.id not in ADMIN_IDS:
         return
     st = get_settings()
-    status_str = "🟢 روشن" if st[13] else "🔴 خاموش"
+    status_str = "🟢 روشن" if st and st[13] else "🔴 خاموش"
+    mode_str = st[14] if st else "هفتگی"
     
     ikb = InlineKeyboardMarkup([
         [
@@ -534,7 +550,7 @@ async def lottery_settings_menu(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("🎁 تنظیم جوایز اول تا سوم", callback_data="set_prizes_menu")],
         [InlineKeyboardButton("🎫 تنظیم قیمت بیلیت قرعه کشی", callback_data="set_ticket_prices_menu")]
     ])
-    msg = f"⚙️ **تنظیمات قرعه‌‌کشی**\n\nوضعیت فعلی: **{status_str}**\nبازه فعلی: **{st[14]}**"
+    msg = f"⚙️ **تنظیمات قرعه‌‌کشی**\n\nوضعیت فعلی: **{status_str}**\nبازه فعلی: **{mode_str}**"
     await update.message.reply_text(msg, reply_markup=ikb, parse_mode="Markdown")
 
 async def handle_lottery_admin_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -682,7 +698,6 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Filter for button presses to auto-cancel pending inputs
     BTN_FILTER = filters.Regex("^(💳|🔗|🎁|👥|🎉|🔒|⏱|📢|📊|بازگشت|💎|💻|📥|👨‍💻|💰).*")
 
     cancel_fallback = [MessageHandler(BTN_FILTER, back_to_main)]
