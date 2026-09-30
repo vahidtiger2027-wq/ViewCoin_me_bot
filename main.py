@@ -306,7 +306,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
         await update.message.reply_text("تعداد ممبر مورد نظر خود را انتخاب کنید:", reply_markup=ikb)
 
-    elif text == "👨‍💻🛍︎فروشگاه":
+    elif text == "👨‍💻🛍︎︎فروشگاه":
         await update.message.reply_text("به فروشگاه خوش آمدید! بخش مورد نظر را انتخاب کنید:", reply_markup=shop_keyboard())
 
     elif text == "👁خرید سکه ویوگیر":
@@ -336,15 +336,46 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚙️ **به پنل مدیریت خوش آمدید:**", reply_markup=admin_keyboard(), parse_mode="Markdown")
 
     elif text == "📊 آمار کاربران" and user.id in ADMIN_IDS:
-        tot_u = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
-        tot_t = db_query("SELECT SUM(tickets) FROM users", fetchone=True)[0] or 0
+        # کل کاربران و لفت داده‌ها
+        tot_u = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0] or 0
+        left_u = db_query("SELECT COUNT(*) FROM users WHERE is_left = 1", fetchone=True)[0] or 0
+        
+        # بیشترین ویو ثبت شده توسط یک کاربر
+        max_view = db_query("SELECT MAX(total_views) FROM users", fetchone=True)[0] or 0
+        
+        # بیشترین سکه موجود/دریافتی
+        max_coin = db_query("SELECT MAX(coin_view) FROM users", fetchone=True)[0] or 0
+        
+        # بیشترین الماس موجود/دریافتی
+        max_diamond = db_query("SELECT MAX(coin_member) FROM users", fetchone=True)[0] or 0
+        
+        # بیشترین کلیک / کلک (پرفعالیت‌ترین کاربر)
+        max_activity = db_query("SELECT MAX(cnt) FROM (SELECT COUNT(*) as cnt FROM user_clicks GROUP BY user_id)", fetchone=True)
+        max_activity_val = max_activity[0] if max_activity else 0
+
+        # بالاترین جوین شده (بیشترین زیرمجموعه)
+        max_ref = db_query("SELECT MAX(ref_count) FROM users", fetchone=True)[0] or 0
+
+        # تعداد کاربران شرکت‌کننده در قرعه‌کشی (دارای حداقل ۱ بلیت)
+        lottery_users = db_query("SELECT COUNT(*) FROM users WHERE tickets > 0", fetchone=True)[0] or 0
+
+        # آمار کل خرید فروشگاه
         tot_s = db_query("SELECT SUM(total_spent) FROM users", fetchone=True)[0] or 0
         
-        msg = f"""📊 **آمار کامل ربات:**
+        msg = f"""📊 **آمار کامل و دقیق ربات:**
 
-👤 **کل کاربران:** {tot_u:,} نفر
-🎟 **کل بلیت‌های صادرشده:** {tot_t:,} عدد
-💳 **کل فروش فروشگاه:** {tot_s:,} تومان"""
+👥 **تعداد کل کاربران:** {tot_u:,} نفر
+🚪 **تعداد لفت‌داده‌ها:** {left_u:,} نفر
+
+👁 **بیشترین ویو:** {max_view:,} بازدید
+💰 **بیشترین سکه دریافتی:** {max_coin:,} سکه
+💎 **بیشترین الماس دریافتی:** {max_diamond:,} الماس
+
+⚡️ **بیشترین فعالیت:** {max_activity_val:,} انجام کار
+🔗 **بالاترین جوین‌شده (زیرمجموعه):** {max_ref:,} نفر
+🎟 **تعداد شرکت کنندگان قرعه‌کشی:** {lottery_users:,} نفر
+
+💳 **آمار خرید (مبلغ فروشگاه):** {tot_s:,} تومان"""
         await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ----------------- ADMIN SETTINGS FUNCTIONS -----------------
