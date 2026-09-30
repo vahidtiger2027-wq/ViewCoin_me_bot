@@ -208,8 +208,7 @@ def admin_keyboard():
 
 # ----------------- CONVERSATION STATES -----------------
 (WAIT_VIEW_POST, WAIT_VIEW_CONFIRM, WAIT_MEMBER_LINK, WAIT_MEMBER_CONFIRM, 
- WAIT_RECEIPT_PHOTO, SET_CARD_STATE, SET_GATEWAY_STATE, SET_DAILY_STATE, 
- SET_REF_STATE, SET_LOTTERY_STATE, SET_SPONSOR_STATE, SET_UNSUB_STATE, BROADCAST_STATE) = range(13)
+ WAIT_RECEIPT_PHOTO, WAIT_NEW_CARD) = range(6)
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -347,6 +346,32 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎟 **کل بلیت‌های صادرشده:** {tot_t:,} عدد
 💳 **کل فروش فروشگاه:** {tot_s:,} تومان"""
         await update.message.reply_text(msg, parse_mode="Markdown")
+
+# ----------------- ADMIN SETTINGS FUNCTIONS -----------------
+async def start_set_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        return ConversationHandler.END
+
+    st = get_settings()
+    current_card = st[1]
+    await update.message.reply_text(
+        f"💳 **تنظیم شماره کارت فروشگاه**\n\n"
+        f"شماره کارت فعلی: `{current_card}`\n\n"
+        f"لطفاً شماره کارت جدید (۱۶ رقمی با نام صاحب حساب) را ارسال کنید:",
+        parse_mode="Markdown"
+    )
+    return WAIT_NEW_CARD
+
+async def save_new_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_card = update.message.text.strip()
+    db_query("UPDATE bot_settings SET card_number = ? WHERE id = 1", (new_card,), commit=True)
+    await update.message.reply_text(f"✅ شماره کارت جدید با موفقیت ثبت شد:\n`{new_card}`", parse_mode="Markdown", reply_markup=admin_keyboard())
+    return ConversationHandler.END
+
+async def cancel_admin_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=admin_keyboard())
+    return ConversationHandler.END
 
 # ----------------- SHOP & LOTTERY CALLBACKS -----------------
 async def handle_lottery_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -638,7 +663,7 @@ async def handle_channel_callbacks(update: Update, context: ContextTypes.DEFAULT
     elif data.startswith("get_diamond_"):
         info = data.replace("get_diamond_", "").split("_")
         target_id = info[1]
-        channel_un = info[2] if len(info) > 2 else None
+        channel_un = info[2] if len(info) > 0 and len(info) > 2 else None
 
         if db_query("SELECT * FROM user_clicks WHERE user_id=? AND target_id=?", (user_id, f"m_{target_id}"), fetchone=True):
             await query.answer("❌ قبلاً پاداش این کانال را دریافت کرده‌اید!", show_alert=True)
@@ -694,10 +719,20 @@ def main():
         fallbacks=[CommandHandler("start", start)]
     )
 
+    # گفتگو برای تنظیم شماره کارت
+    card_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^💳 تنظیم شماره کارت$"), start_set_card)],
+        states={
+            WAIT_NEW_CARD: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_new_card)]
+        },
+        fallbacks=[MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), cancel_admin_state)]
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(view_conv)
     app.add_handler(member_conv)
     app.add_handler(receipt_conv)
+    app.add_handler(card_conv)
 
     app.add_handler(CallbackQueryHandler(handle_lottery_callbacks, pattern="^(lottery_|goto_shop)"))
     app.add_handler(CallbackQueryHandler(select_buy_package, pattern="^buy_"))
