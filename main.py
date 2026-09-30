@@ -1,21 +1,6 @@
 import os
 import sqlite3
-import datetime
-import logging
-import random
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, filters, ConversationHandler
-)
-
-# ----------------- CONFIGURATION -----------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8864400306:AAHsgcfH1GdWzJARqMxnX8ABMWBYWFH4Rn4")
-PORT = int(os.environ.get("PORT", 10000))
-ADMIN_ID = 5412332176  # آیدی ادمین اصلی
-
+import 
 VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
 MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
 
