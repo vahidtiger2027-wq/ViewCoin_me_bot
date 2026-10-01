@@ -16,9 +16,6 @@ PORT = int(os.environ.get("PORT", 10000))
 ADMIN_ID = 5412332176
 ADMIN_IDS = [ADMIN_ID]
 
-VIEW_CHANNEL = os.environ.get("VIEW_CHANNEL", "@my_view_chan")
-MEMBER_CHANNEL = os.environ.get("MEMBER_CHANNEL", "@my_member_chan")
-
 logging.basicConfig(level=logging.INFO)
 
 # ----------------- HEALTH CHECK SERVER -----------------
@@ -80,7 +77,9 @@ def init_db():
         lottery_p3 TEXT DEFAULT '500 سکه',
         winner_1 TEXT DEFAULT 'هنوز مشخص نشده',
         winner_2 TEXT DEFAULT 'هنوز مشخص نشده',
-        winner_3 TEXT DEFAULT 'هنوز مشخص نشده'
+        winner_3 TEXT DEFAULT 'هنوز مشخص نشده',
+        coin_per_view INTEGER DEFAULT 1,
+        diamond_per_member INTEGER DEFAULT 1
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS lottery_packs (
@@ -91,20 +90,17 @@ def init_db():
     
     c.execute("INSERT OR IGNORE INTO bot_settings (id) VALUES (1)")
 
-    c.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in c.fetchall()]
-    if "tickets" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN tickets INTEGER DEFAULT 0")
+    # Safe Column Alterations
+    c.execute("PRAGMA table_info(bot_settings)")
+    cols = [col[1] for col in c.fetchall()]
+    if "coin_per_view" not in cols:
+        c.execute("ALTER TABLE bot_settings ADD COLUMN coin_per_view INTEGER DEFAULT 1")
+    if "diamond_per_member" not in cols:
+        c.execute("ALTER TABLE bot_settings ADD COLUMN diamond_per_member INTEGER DEFAULT 1")
 
     c.execute("SELECT COUNT(*) FROM lottery_packs")
     if c.fetchone()[0] == 0:
-        default_packs = [
-            (50000, 2),
-            (100000, 4),
-            (150000, 4),
-            (200000, 6),
-            (500000, 10)
-        ]
+        default_packs = [(50000, 2), (100000, 4), (150000, 4), (200000, 6), (500000, 10)]
         c.executemany("INSERT INTO lottery_packs (price, tickets) VALUES (?, ?)", default_packs)
 
     conn.commit()
@@ -163,140 +159,192 @@ def main_keyboard(user_id):
         kb.append(["⚙ پنل مدیریت"])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
-def admin_keyboard():
-    kb = [
-        ["📊 آمار کاربران", "💳 تنظیم شماره کارت"],
-        ["🔗 تنظیم درگاه پرداخت", "🎁 تنظیم هدیه روزانه"],
-        ["🔒 تنظیم اسپانسر", "🎉 تنظیمات جوایز قرعه‌کشی"],
-        ["📢 ارسال پیام همگانی", "بازگشت به منوی اصلی"]
-    ]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
+def admin_inline_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 آمار کاربران", callback_data="adm_stats")],
+        [InlineKeyboardButton("💳 شماره کارت", callback_data="adm_card"), InlineKeyboardButton("🔗 درگاه پرداخت", callback_data="adm_gateway")],
+        [InlineKeyboardButton("🎁 هدیه روزانه", callback_data="adm_daily"), InlineKeyboardButton("👥 هدیه زیرمجموعه", callback_data="adm_ref")],
+        [InlineKeyboardButton("🔒 اسپانسر (جوین اجباری)", callback_data="adm_sponsor")],
+        [InlineKeyboardButton("👁 نرخ ویو", callback_data="adm_rate_view"), InlineKeyboardButton("👤 نرخ ممبر", callback_data="adm_rate_member")],
+        [InlineKeyboardButton("⚠️ جریمه لفت", callback_data="adm_penalty"), InlineKeyboardButton("⏱ ماندگاری در کانال", callback_data="adm_unsub_days")],
+        [InlineKeyboardButton("🎉 تنظیمات قرعه کشی", callback_data="adm_lottery_menu")],
+        [InlineKeyboardButton("📢 ارسال پیام همگانی", callback_data="adm_broadcast")]
+    ])
+
+# ----------------- CONVERSATION STATES -----------------
+(
+    SET_CARD, SET_GATEWAY, SET_DAILY_COIN, SET_DAILY_DIAMOND,
+    SET_REF_COIN, SET_REF_DIAMOND, SET_SPONSOR, SET_RATE_VIEW,
+    SET_RATE_MEMBER, SET_PENALTY, SET_UNSUB_DAYS, SET_BROADCAST
+) = range(12)
 
 # ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    args = context.args
-    referrer_id = int(args[0]) if args and args[0].isdigit() else 0
-    get_or_create_user(user.id, user.username or "", referrer_id)
+    get_or_create_user(user.id, user.username or "")
     await update.message.reply_text(f"سلام {user.first_name} عزیز، خوش آمدید!", reply_markup=main_keyboard(user.id))
 
-async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("بازگشت به منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id in ADMIN_IDS:
+        await update.message.reply_text("⚙️ **پنل مدیریت ربات**\nجهت تنظیم هر بخش دکمه مربوطه را انتخاب کنید:", reply_markup=admin_inline_keyboard(), parse_mode="Markdown")
 
-# --- این تابع اصلی قرعه‌کشی با ۳ دکمه شیشه‌ای است ---
-async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = get_or_create_user(update.effective_user.id)
-    tickets = u[12] if (u and len(u) > 12 and u[12] is not None) else 0
-    st = get_settings()
-    
-    status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
-    mode_str = st[14] if st else "هفتگی"
-    p1 = st[15] if st else "نامشخص"
-    p2 = st[16] if st else "نامشخص"
-    p3 = st[17] if st else "نامشخص"
-
-    msg = f"""🎉 **قرعه‌کشی بزرگ ربات**
-
-📌 **وضعیت:** {status_str}
-📅 **بازه برگزاری:** {mode_str}
-
-🎁 **جوایز این دوره:**
-🥇 **نفر اول:** {p1}
-🥈 **نفر دوم:** {p2}
-🥉 **نفر سوم:** {p3}
-
-🎫 **تعداد بلیت‌های شما:** {tickets:,}
-
-لطفاً یکی از گزینه‌های زیر را انتخاب کنید:"""
-
-    ikb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎟 ورود به قرعه کشی و خرید بلیت", callback_data="lottery_enter_inline")],
-        [
-            InlineKeyboardButton("🏆 نمایش برندگان", callback_data="lottery_winners_inline"),
-            InlineKeyboardButton("🎁 نمایش جوایز", callback_data="lottery_prizes_inline")
-        ]
-    ])
-
-    await update.message.reply_text(msg, reply_markup=ikb, parse_mode="Markdown")
-
-async def lottery_inline_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
+    await query.answer()
 
-    if data == "lottery_enter_inline":
-        u = get_or_create_user(update.effective_user.id)
-        tickets = u[12] if len(u) > 12 and u[12] is not None else 0
-        packs = db_query("SELECT id, price, tickets FROM lottery_packs ORDER BY id ASC", fetchall=True)
-        ikb = []
-        for p in packs:
-            ikb.append([InlineKeyboardButton(f"قیمت: {p[1]:,} تومان | {p[2]} بلیت 🎫", callback_data=f"buy_pack_{p[0]}")])
-            
-        msg = f"""🎟 **ورود به قرعه‌کشی**
+    if data == "adm_stats":
+        total_users = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
+        await query.message.reply_text(f"📊 **آمار کاربران:**\n\n👥 کل اعضا: **{total_users}** نفر", parse_mode="Markdown")
 
-🎫 **تعداد بلیت‌های فعلی شما:** {tickets:,}
-
-جهت افزایش شانس برنده شدن می‌توانید بسته‌های زیر را خریداری کنید:"""
-        await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(ikb), parse_mode="Markdown")
-
-    elif data == "lottery_winners_inline":
+    elif data == "adm_lottery_menu":
         st = get_settings()
-        w1 = st[18] if st and len(st) > 18 and st[18] else "هنوز مشخص نشده"
-        w2 = st[19] if st and len(st) > 19 and st[19] else "هنوز مشخص نشده"
-        w3 = st[20] if st and len(st) > 20 and st[20] else "هنوز مشخص نشده"
+        status_str = "🟢 روشن" if st and st[13] else "🔴 خاموش"
+        ikb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("خاموش 🔴", callback_data="lottery_off"), InlineKeyboardButton("روشن 🟢", callback_data="lottery_on")]
+        ])
+        await query.message.reply_text(f"🎉 **تنظیمات قرعه کشی**\nوضعیت فعلی: {status_str}", reply_markup=ikb)
 
-        msg = f"""🏆 **برندگان دوره قبل قرعه‌کشی**
-
-🥇 **نفر اول:** {w1}
-🥈 **نفر دوم:** {w2}
-🥉 **نفر سوم:** {w3}"""
-        await query.message.reply_text(msg, parse_mode="Markdown")
-
-    elif data == "lottery_prizes_inline":
-        st = get_settings()
-        p1 = st[15] if st else "نامشخص"
-        p2 = st[16] if st else "نامشخص"
-        p3 = st[17] if st else "نامشخص"
-        status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
-        mode_str = st[14] if st else "هفتگی"
-
-        msg = f"""🎁 **جوایز قرعه‌کشی این دوره**
-
-📌 **وضعیت:** {status_str}
-📅 **بازه برگزاری:** {mode_str}
-
-🥇 **نفر اول:** {p1}
-🥈 **نفر دوم:** {p2}
-🥉 **نفر سوم:** {p3}"""
-        await query.message.reply_text(msg, parse_mode="Markdown")
-
-async def buy_pack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----------------- CONVERSATIONS -----------------
+async def start_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    pack_id = query.data.replace("buy_pack_", "")
-    pack = db_query("SELECT price, tickets FROM lottery_packs WHERE id=?", (pack_id,), fetchone=True)
-    st = get_settings()
-    if pack:
-        msg = f"""💳 **سفارش خرید بلیت قرعه‌کشی**
+    await query.message.reply_text("💳 لطفاً شماره کارت جدید را وارد کنید:")
+    return SET_CARD
 
-🎫 تعداد بلیت: {pack[1]} عدد
-💰 مبلغ: {pack[0]:,} تومان
+async def save_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db_query("UPDATE bot_settings SET card_number = ? WHERE id = 1", (update.message.text.strip(),), commit=True)
+    await update.message.reply_text("✅ شماره کارت ذخیره شد.")
+    return ConversationHandler.END
 
-لطفاً مبلغ را به کارت زیر واریز کنید:
-`{st[1]}`"""
-        await query.message.reply_text(msg, parse_mode="Markdown")
+async def start_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("👥 لطفاً **تعداد سکه** هدیه زیرمجموعه‌گیری را وارد کنید:")
+    return SET_REF_COIN
 
-# ----------------- MAIN APP -----------------
+async def save_ref_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["ref_coin"] = int(update.message.text.strip())
+    await update.message.reply_text("حال لطفاً **تعداد الماس** هدیه زیرمجموعه‌گیری را وارد کنید:")
+    return SET_REF_DIAMOND
+
+async def save_ref_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    d = int(update.message.text.strip())
+    c = context.user_data.get("ref_coin", 200)
+    db_query("UPDATE bot_settings SET ref_coin = ?, ref_diamond = ? WHERE id = 1", (c, d), commit=True)
+    await update.message.reply_text(f"✅ پورسانت زیرمجموعه تنظیم شد:\n🪙 {c} سکه | 💎 {d} الماس")
+    return ConversationHandler.END
+
+async def start_rate_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("👁 برای ۱ بازدید، کاربر چند **سکه** باید پرداخت کند؟")
+    return SET_RATE_VIEW
+
+async def save_rate_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    v = int(update.message.text.strip())
+    db_query("UPDATE bot_settings SET coin_per_view = ? WHERE id = 1", (v,), commit=True)
+    await update.message.reply_text(f"✅ هزینه هر بازدید: **{v} سکه** تنظیم شد.", parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def start_rate_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("👤 برای ۱ ممبر، کاربر چند **الماس** باید پرداخت کند؟")
+    return SET_RATE_MEMBER
+
+async def save_rate_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = int(update.message.text.strip())
+    db_query("UPDATE bot_settings SET diamond_per_member = ? WHERE id = 1", (m,), commit=True)
+    await update.message.reply_text(f"✅ هزینه هر ممبر: **{m} الماس** تنظیم شد.", parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def start_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("⚠️ در صورت لفت زودتر از موعد، چند **الماس/سکه** به عنوان جریمه کسر شود؟")
+    return SET_PENALTY
+
+async def save_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    p = int(update.message.text.strip())
+    db_query("UPDATE bot_settings SET unsub_penalty = ? WHERE id = 1", (p,), commit=True)
+    await update.message.reply_text(f"✅ جریمه لفت: **{p} عدد** تنظیم شد.", parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def start_unsub_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("⏱ کاربر چند **روز** باید در کانال بماند تا جریمه نشود؟")
+    return SET_UNSUB_DAYS
+
+async def save_unsub_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    d = int(update.message.text.strip())
+    db_query("UPDATE bot_settings SET unsub_days = ? WHERE id = 1", (d,), commit=True)
+    await update.message.reply_text(f"✅ روزهای ماندگاری: **{d} روز** تنظیم شد.", parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("منوی اصلی:", reply_markup=main_keyboard(update.effective_user.id))
+
+# ----------------- MAIN -----------------
 def main():
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    BTN_FILTER = filters.Regex("^(💳|🔗|🎁|👥|🎉|🔒|⏱|📢|📊|⚙).*")
+    cancel_fallback = [MessageHandler(BTN_FILTER, back_to_main)]
+
+    # Conversations for Admin Buttons
+    card_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_card, pattern="^adm_card$")],
+        states={SET_CARD: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_card)]},
+        fallbacks=cancel_fallback
+    )
+
+    ref_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_ref, pattern="^adm_ref$")],
+        states={
+            SET_REF_COIN: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_ref_coin)],
+            SET_REF_DIAMOND: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_ref_diamond)]
+        },
+        fallbacks=cancel_fallback
+    )
+
+    rate_view_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_rate_view, pattern="^adm_rate_view$")],
+        states={SET_RATE_VIEW: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_rate_view)]},
+        fallbacks=cancel_fallback
+    )
+
+    rate_member_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_rate_member, pattern="^adm_rate_member$")],
+        states={SET_RATE_MEMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_rate_member)]},
+        fallbacks=cancel_fallback
+    )
+
+    penalty_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_penalty, pattern="^adm_penalty$")],
+        states={SET_PENALTY: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_penalty)]},
+        fallbacks=cancel_fallback
+    )
+
+    unsub_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_unsub_days, pattern="^adm_unsub_days$")],
+        states={SET_UNSUB_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~BTN_FILTER, save_unsub_days)]},
+        fallbacks=cancel_fallback
+    )
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Regex("^🎉 قرعه کشی$"), lottery_user_menu))
-    app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
-    
-    app.add_handler(CallbackQueryHandler(lottery_inline_callback, pattern="^lottery_.*_inline$"))
-    app.add_handler(CallbackQueryHandler(buy_pack_callback, pattern="^buy_pack_"))
+    app.add_handler(MessageHandler(filters.Regex("^⚙ پنل مدیریت$"), admin_panel))
+
+    app.add_handler(card_conv)
+    app.add_handler(ref_conv)
+    app.add_handler(rate_view_conv)
+    app.add_handler(rate_member_conv)
+    app.add_handler(penalty_conv)
+    app.add_handler(unsub_conv)
+
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^adm_.*"))
 
     logging.info("Bot started...")
     app.run_polling(drop_pending_updates=True)
