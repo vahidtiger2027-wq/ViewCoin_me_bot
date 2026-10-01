@@ -82,12 +82,12 @@ def init_db():
         unsub_penalty INTEGER DEFAULT 2,
         lottery_active INTEGER DEFAULT 1,
         lottery_mode TEXT DEFAULT 'هفتگی',
-        lottery_p1 TEXT DEFAULT '0 الماس ممبرگیر',
-        lottery_p2 TEXT DEFAULT '0 سکه ویوگیر',
-        lottery_p3 TEXT DEFAULT '0 سکه ویوگیر',
-        winner_1 TEXT DEFAULT '',
-        winner_2 TEXT DEFAULT '',
-        winner_3 TEXT DEFAULT ''
+        lottery_p1 TEXT DEFAULT '100 الماس',
+        lottery_p2 TEXT DEFAULT '1000 سکه',
+        lottery_p3 TEXT DEFAULT '500 سکه',
+        winner_1 TEXT DEFAULT 'هنوز مشخص نشده',
+        winner_2 TEXT DEFAULT 'هنوز مشخص نشده',
+        winner_3 TEXT DEFAULT 'هنوز مشخص نشده'
     )''')
 
     c.execute('''CREATE TABLE IF NOT EXISTS lottery_packs (
@@ -98,7 +98,6 @@ def init_db():
     
     c.execute("INSERT OR IGNORE INTO bot_settings (id) VALUES (1)")
 
-    # چک کردن ستون‌های جدول برای کاربران قدیمی
     c.execute("PRAGMA table_info(users)")
     columns = [col[1] for col in c.fetchall()]
     if "tickets" not in columns:
@@ -187,6 +186,14 @@ def main_keyboard(user_id):
     ]
     if user_id in ADMIN_IDS:
         kb.append(["⚙ پنل مدیریت"])
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
+
+def lottery_main_keyboard():
+    kb = [
+        ["🎟 ورود به قرعه کشی"],
+        ["🏆 نمایش برندگان قرعه کشی", "🎁 نمایش جوایز قرعه کشی"],
+        ["بازگشت به منوی اصلی"]
+    ]
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def admin_keyboard():
@@ -302,32 +309,74 @@ async def shop_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 پس از واریز، عکس فیش واریزی را برای پشتیبانی ارسال کنید."""
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+# ----------------- LOTTERY USER MENU -----------------
 async def lottery_user_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    st = get_settings()
+    await update.message.reply_text("🎉 به بخش قرعه‌کشی بزرگ ربات خوش آمدید!\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:", reply_markup=lottery_main_keyboard())
+
+async def lottery_enter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = get_or_create_user(update.effective_user.id)
+    tickets = u[12] if len(u) > 12 and u[12] is not None else 0
     
-    status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
-    mode_str = st[14] if st else "هفتگی"
+    packs = db_query("SELECT id, price, tickets FROM lottery_packs ORDER BY id ASC", fetchall=True)
+    ikb = []
+    for p in packs:
+        ikb.append([InlineKeyboardButton(f"قیمت: {p[1]:,} تومان | {p[2]} بلیت 🎫", callback_data=f"buy_pack_{p[0]}")])
+        
+    st = get_settings()
+    msg = f"""🎟 **ورود به قرعه‌کشی**
+
+🎫 **تعداد بلیت‌های فعلی شما:** {tickets:,}
+
+جهت افزایش شانس برنده شدن می‌توانید بسته‌های زیر را خریداری کنید:"""
+    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(ikb), parse_mode="Markdown")
+
+async def lottery_prizes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    st = get_settings()
     p1 = st[15] if st else "نامشخص"
     p2 = st[16] if st else "نامشخص"
     p3 = st[17] if st else "نامشخص"
-    
-    tickets = u[12] if len(u) > 12 and u[12] is not None else 0
-    
-    msg = f"""🎉 **قرعه‌کشی بزرگ ربات**
+    status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
+    mode_str = st[14] if st else "هفتگی"
+
+    msg = f"""🎁 **جوایز قرعه‌کشی این دوره**
 
 📌 **وضعیت:** {status_str}
 📅 **بازه برگزاری:** {mode_str}
 
-🎁 **جوایز این دوره:**
 🥇 **نفر اول:** {p1}
 🥈 **نفر دوم:** {p2}
-🥉 **نفر سوم:** {p3}
-
-🎫 **تعداد بلیت‌های شما:** {tickets:,}
-
-شما با خرید از فروشگاه یا فعالیت در ربات بلیت قرعه‌‌کشی دریافت می‌کنید!"""
+🥉 **نفر سوم:** {p3}"""
     await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def lottery_winners(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    st = get_settings()
+    w1 = st[18] if st and len(st) > 18 and st[18] else "هنوز مشخص نشده"
+    w2 = st[19] if st and len(st) > 19 and st[19] else "هنوز مشخص نشده"
+    w3 = st[20] if st and len(st) > 20 and st[20] else "هنوز مشخص نشده"
+
+    msg = f"""🏆 **برندگان دوره قبل قرعه‌کشی**
+
+🥇 **نفر اول:** {w1}
+🥈 **نفر دوم:** {w2}
+🥉 **نفر سوم:** {w3}"""
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def buy_pack_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pack_id = query.data.replace("buy_pack_", "")
+    pack = db_query("SELECT price, tickets FROM lottery_packs WHERE id=?", (pack_id,), fetchone=True)
+    st = get_settings()
+    
+    if pack:
+        msg = f"""💳 **سفارش خرید بلیت قرعه‌کشی**
+
+🎫 تعداد بلیت: {pack[1]} عدد
+💰 مبلغ: {pack[0]:,} تومان
+
+لطفاً مبلغ فوق را به شماره کارت زیر واریز کرده و فیش را ارسال کنید:
+`{st[1]}`"""
+        await query.message.reply_text(msg, parse_mode="Markdown")
 
 async def ads_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ikb = InlineKeyboardMarkup([
@@ -698,7 +747,7 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    BTN_FILTER = filters.Regex("^(💳|🔗|🎁|👥|🎉|🔒|⏱|📢|📊|بازگشت|💎|💻|📥|👨‍💻|💰).*")
+    BTN_FILTER = filters.Regex("^(💳|🔗|🎁|👥|🎉|🔒|⏱|📢|📊|بازگشت|💎|💻|📥|👨‍💻|💰|🎟|🏆).*")
 
     cancel_fallback = [MessageHandler(BTN_FILTER, back_to_main)]
 
@@ -781,6 +830,12 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(".*ثبت تبلیغ ویو گیر و ممبر گیر.*"), ads_menu))
     app.add_handler(MessageHandler(filters.Regex(".*فروشگاه.*"), shop_menu))
     app.add_handler(MessageHandler(filters.Regex(".*قرعه کشی.*"), lottery_user_menu))
+    
+    # Lottery User Sub-Buttons
+    app.add_handler(MessageHandler(filters.Regex(".*ورود به قرعه کشی.*"), lottery_enter))
+    app.add_handler(MessageHandler(filters.Regex(".*نمایش جوایز قرعه کشی.*"), lottery_prizes))
+    app.add_handler(MessageHandler(filters.Regex(".*نمایش برندگان قرعه کشی.*"), lottery_winners))
+    
     app.add_handler(MessageHandler(filters.Regex("^بازگشت به منوی اصلی$"), back_to_main))
 
     # Admin Buttons
@@ -801,6 +856,7 @@ def main():
 
     # Callback Query Handlers
     app.add_handler(CallbackQueryHandler(check_sponsor_callback, pattern="^check_sponsor_again$"))
+    app.add_handler(CallbackQueryHandler(buy_pack_callback, pattern="^buy_pack_"))
     app.add_handler(CallbackQueryHandler(handle_lottery_admin_callbacks, pattern="^(lottery_|set_prizes_menu|prize_rank_|set_ticket_prices_menu)"))
 
     logging.info("Bot is running...")
