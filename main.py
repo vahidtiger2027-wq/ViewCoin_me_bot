@@ -180,7 +180,7 @@ def admin_inline_keyboard():
     BROADCAST_MSG
 ) = range(14)
 
-# ----------------- BASIC HANDLERS -----------------
+# ----------------- HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     get_or_create_user(user.id, user.username or "")
@@ -195,7 +195,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     await query.answer()
 
-    # 1. آمار کاربران
+    # 1. آمار دقیق کاربران
     if data == "adm_stats":
         total_u = db_query("SELECT COUNT(*) FROM users", fetchone=True)[0]
         left_u = db_query("SELECT COUNT(*) FROM users WHERE is_left=1", fetchone=True)[0]
@@ -216,13 +216,13 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🪙 بیشترین سکه دریافتی: **{max_c:,}**
 💎 بیشترین الماس دریافتی: **{max_d:,}**
 🔥 بیشترین فعالیت امروز: **{max_act:,}**
-👥 بالاترین جوین (زیرمجموعه‌‌گیری): **{max_ref:,}** نفر
+👥 بالاترین جوین (زیرمجموعه‌گیری): **{max_ref:,}** نفر
 
 🎫 شرکت‌کنندگان قرعه‌کشی: **{lottery_u:,}** نفر
 💰 آمار خریدهای فروشگاه: **{total_buy:,}** تومان"""
         await query.message.reply_text(msg, parse_mode="Markdown")
 
-    # 6. منوی اسپانسر
+    # 6. اسپانسر
     elif data == "adm_sponsor_menu":
         sponsors = db_query("SELECT id, link FROM sponsors", fetchall=True)
         ikb = [[InlineKeyboardButton("➕ افزودن لینک جدید", callback_data="adm_add_sponsor")],
@@ -230,14 +230,14 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for sp in sponsors:
             ikb.append([InlineKeyboardButton(f"❌ حذف: {sp[1]}", callback_data=f"del_sp_{sp[0]}")])
         
-        await query.message.reply_text("🔒 **مدیریت اسپانسر و جوین اجباری**\nبرای حذف هر لینک کافیست روی دکمه آن کلیک کنید:", reply_markup=InlineKeyboardMarkup(ikb))
+        await query.message.reply_text("🔒 **مدیریت اسپانسر و جوین اجباری**\nبرای حذف هر لینک روی دکمه مربوطه بزنید:", reply_markup=InlineKeyboardMarkup(ikb))
 
     elif data.startswith("del_sp_"):
         sp_id = data.replace("del_sp_", "")
         db_query("DELETE FROM sponsors WHERE id=?", (sp_id,), commit=True)
-        await query.message.reply_text("✅ لینک اسپانسر حذف شد.")
+        await query.message.reply_text("✅ لینک اسپانسر با موفقیت حذف شد.")
 
-    # 7. منوی قرعه کشی
+    # 7. قرعه کشی
     elif data == "adm_lottery_menu":
         st = get_settings()
         status_str = "🟢 فعال" if st and st[13] else "🔴 غیرفعال"
@@ -250,10 +250,9 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("lottery_toggle_"):
         val = int(data.replace("lottery_toggle_", ""))
         db_query("UPDATE bot_settings SET lottery_active=? WHERE id=1", (val,), commit=True)
-        await query.message.reply_text("✅ وضعیت قرعه‌کشی به روز شد.")
+        await query.message.reply_text("✅ وضعیت قرعه‌کشی با موفقیت به روز شد.")
 
 # ----------------- CONVERSATIONS -----------------
-# 2. هدیه زیرمجموعه‌گیری
 async def start_ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("👥 **مرحله اول:** لطفاً **مقدار سکه** هدیه زیرمجموعه‌گیری را وارد کنید:")
@@ -271,7 +270,6 @@ async def save_ref_diamond(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ هدیه زیرمجموعه‌گیری تنظیم شد:\n🪙 {c} سکه | 💎 {d} الماس")
     return ConversationHandler.END
 
-# 3. شماره کارت
 async def start_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("💳 لطفاً شماره کارت جدید **۱۶ رقمی** را وارد کنید:")
@@ -283,7 +281,6 @@ async def save_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ شماره کارت جدید ثبت شد:\n`{card}`", parse_mode="Markdown")
     return ConversationHandler.END
 
-# 4. درگاه / آیدی
 async def start_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("🔗 لطفاً لینک یا آیدی جدید درگاه پرداخت را وارد کنید:")
@@ -295,7 +292,6 @@ async def save_gateway(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ درگاه پرداخت به روز شد:\n{gw}")
     return ConversationHandler.END
 
-# 5. هدیه روزانه
 async def start_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("🎁 **مرحله اول:** لطفاً **مقدار الماس** هدیه روزانه را وارد کنید:")
@@ -313,7 +309,6 @@ async def save_daily_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ هدیه روزانه تنظیم شد:\n💎 {d} الماس | 🪙 {c} سکه")
     return ConversationHandler.END
 
-# 6. افزودن لینک اسپانسر و متن استارت
 async def start_add_sponsor(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("🔒 لطفاً لینک جدید کانال اسپانسر را ارسال کنید:")
@@ -322,21 +317,20 @@ async def start_add_sponsor(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def save_sponsor_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = update.message.text.strip()
     db_query("INSERT OR IGNORE INTO sponsors (link) VALUES (?)", (link,), commit=True)
-    await update.message.reply_text("✅ لینک جدید اسپانسر با موفقیت اضافه شد.")
+    await update.message.reply_text("✅ لینک جدید اسپانسر اضافه شد.")
     return ConversationHandler.END
 
 async def start_set_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("✏️ متن جدید راهنما برای استارت ربات را ارسال کنید:")
+    await update.callback_query.message.reply_text("✏️ متن جدید استارت ربات را ارسال کنید:")
     return SET_START_TEXT
 
 async def save_start_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     db_query("UPDATE bot_settings SET welcome_msg=? WHERE id=1", (txt,), commit=True)
-    await update.message.reply_text("✅ متن استارت با موفقیت ذخیره شد.")
+    await update.message.reply_text("✅ متن استارت ذخیره شد.")
     return ConversationHandler.END
 
-# 7. تنظیم جوایز قرعه کشی
 async def start_lottery_prizes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("🥇 جایزه **نفر اول** را وارد کنید:")
@@ -357,13 +351,12 @@ async def save_p3(update: Update, context: ContextTypes.DEFAULT_TYPE):
     p1 = context.user_data.get("p1", "نامشخص")
     p2 = context.user_data.get("p2", "نامشخص")
     db_query("UPDATE bot_settings SET lottery_p1=?, lottery_p2=?, lottery_p3=? WHERE id=1", (p1, p2, p3), commit=True)
-    await update.message.reply_text("✅ جوایز ۱ تا ۳ قرعه‌کشی با موفقیت بروزرسانی شد.")
+    await update.message.reply_text("✅ جوایز ۱ تا ۳ قرعه‌کشی به روز رسانی شد.")
     return ConversationHandler.END
 
-# 8. ماندگاری در کانال
 async def start_unsub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("⏱ تعداد **روزهای ماندگاری** اجباری کاربر در کانال را وارد کنید:")
+    await update.callback_query.message.reply_text("⏱ تعداد **روزهای ماندگاری** در کانال را وارد کنید:")
     return SET_UNSUB_DAYS
 
 async def save_unsub(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -372,22 +365,20 @@ async def save_unsub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ ماندگاری در کانال: **{days} روز** تعیین شد.", parse_mode="Markdown")
     return ConversationHandler.END
 
-# 9. جریمه لفت
 async def start_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("⚠️️ مقدار **جریمه لفت** قبل از موعد (کسر سکه/الماس) را وارد کنید:")
+    await update.callback_query.message.reply_text("⚠ مقدار **جریمه لفت** را وارد کنید:")
     return SET_PENALTY
 
 async def save_penalty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pen = int(update.message.text.strip())
     db_query("UPDATE bot_settings SET unsub_penalty=? WHERE id=1", (pen,), commit=True)
-    await update.message.reply_text(f"✅ جریمه لفت زودتر از موعد: **{pen} عدد** ثبت شد.", parse_mode="Markdown")
+    await update.message.reply_text(f"✅ جریمه لفت: **{pen} عدد** ثبت شد.", parse_mode="Markdown")
     return ConversationHandler.END
 
-# 10. پیام همگانی
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await update.callback_query.message.reply_text("📢 پیام همگانی خود را (متن یا رسانه) جهت ارسال به کل کاربران بفرستید:")
+    await update.callback_query.message.reply_text("📢 پیام همگانی خود را بفرستید:")
     return BROADCAST_MSG
 
 async def save_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -399,7 +390,7 @@ async def save_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count += 1
         except Exception:
             pass
-    await update.message.reply_text(f"✅ پیام همگانی با موفقیت به **{count}** کاربر ارسال شد.")
+    await update.message.reply_text(f"✅ پیام همگانی به **{count}** کاربر ارسال شد.")
     return ConversationHandler.END
 
 async def cancel_fallback_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -413,7 +404,6 @@ def main():
     BTN_FILTER = filters.Regex("^(💎|💻|👥|📥|👨‍💻🛍|🎉|💰|⚙).*")
     fallbacks = [MessageHandler(BTN_FILTER, cancel_fallback_cmd)]
 
-    # Conversations
     ref_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_ref, pattern="^adm_ref_start$")],
         states={
