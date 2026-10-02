@@ -1,8 +1,27 @@
+import os
+from threading import Thread
+from flask import Flask
 import telebot
 from telebot import types
 import config
 import database
 import keyboards
+
+# ساخت یک وب‌سرور ساده برای راضی کردن Render
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.daemon = True
+    t.start()
 
 bot = telebot.TeleBot(config.BOT_TOKEN)
 
@@ -111,5 +130,6 @@ def send_welcome_menu(user_id):
 
 if __name__ == "__main__":
     database.init_db()
+    keep_alive()  # روشن کردن وب سرور برای Render
     print("ربات روشن و فعال شد...")
     bot.infinity_polling()
