@@ -1,61 +1,53 @@
 from telebot import types
 
-# کیبورد منوی اصلی کاربران
 def main_menu_keyboard(is_admin=False):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
-    btn1 = types.KeyboardButton("🎁 هدیه روزانه")
-    btn2 = types.KeyboardButton("👥 زیرمجموعه‌گیری")
-    btn3 = types.KeyboardButton("👤 حساب کاربری")
-    btn4 = types.KeyboardButton("👁‍🗨 ثبت سفارش ویو و ممبر")
-    btn5 = types.KeyboardButton("🛒 فروشگاه")
-    btn6 = types.KeyboardButton("🔄 انتقال سکه و الماس")
-    btn7 = types.KeyboardButton("🏆 ورود به قرعه‌کشی")
-    
-    markup.add(btn1, btn2)
-    markup.add(btn3)
-    markup.add(btn4, btn5)
-    markup.add(btn6, btn7)
-    
-    # اگر کاربر مدیر باشد، دکمه پنل مدیریت هم اضافه می‌شود
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("🎁 هدیه روزانه", "👥 زیرمجموعه‌گیری")
+    markup.add("👤 حساب کاربری")
+    markup.add("🛒 فروشگاه", "👁‍‍🗨 ثبت سفارش ویو و ممبر")
+    markup.add("🏆 ورود به قرعه‌کشی", "🔄 انتقال سکه و الماس")
     if is_admin:
-        btn_admin = types.KeyboardButton("⚙️ پنل مدیریت")
-        markup.add(btn_admin)
-        
+        markup.add("⚙️ پنل مدیریت")
     return markup
 
-# کیبورد پنل مدیریت اصلی
-def admin_panel_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
-    btn1 = types.KeyboardButton("⚙️ تغییر مقدار سکه و الماس هدیه روزانه")
-    btn2 = types.KeyboardButton("⚙️ تغییر مقدار هدیه زیرمجموعه‌گیری")
-    btn3 = types.KeyboardButton("⚙️ تغییر لینک درگاه پرداخت")
-    btn4 = types.KeyboardButton("⚙️ تغییر شماره کارت")
-    btn5 = types.KeyboardButton("⚙️ تغییر سفارشات ویو و ممبر")
-    btn6 = types.KeyboardButton("⚙️️ تغییر قیمت سکه و الماس فروشگاه")
-    btn7 = types.KeyboardButton("⚙️ تغییر تنظیمات قرعه کشی")
-    btn8 = types.KeyboardButton("⚙️ اسپانسر جوین اجباری")
-    btn9 = types.KeyboardButton("⚙️ تنظیم جریمه لفت و روزهای ماندگاری")
-    btn10 = types.KeyboardButton("📢 پیام همگانی")
-    btn11 = types.KeyboardButton("👋 پیام خوشامد گویی")
-    btn_back = types.KeyboardButton("🔙 بازگشت به منوی اصلی")
-    
-    markup.add(btn1)
-    markup.add(btn2)
-    markup.add(btn3, btn4)
-    markup.add(btn5)
-    markup.add(btn6)
-    markup.add(btn7)
-    markup.add(btn8)
-    markup.add(btn9)
-    markup.add(btn10, btn11)
-    markup.add(btn_back)
-    
+def order_type_keyboard():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👁‍🗨 سفارش ویو (بازدید)", callback_data="order_type_view"),
+        types.InlineKeyboardButton("👥 سفارش ممبر (عضو)", callback_data="order_type_member")
+    )
+    markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_action"))
     return markup
 
-# کیبورد شیشه‌ای بازگشت/انصراف
+def order_packages_keyboard(service_type):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if service_type == "view":
+        markup.add(
+            types.InlineKeyboardButton("▫️ بسته ۱: ۱۰۰ بازدید ➔ ۱۰ سکه", callback_data="pkg_view_100_10"),
+            types.InlineKeyboardButton("▫️ بسته ۲: ۵۰۰ بازدید ➔ ۴۵ سکه", callback_data="pkg_view_500_45"),
+            types.InlineKeyboardButton("▫️ بسته ۳: ۱,۰۰۰ بازدید ➔ ۸۰ سکه", callback_data="pkg_view_1000_80"),
+            types.InlineKeyboardButton("▫️ بسته ۴: ۵,۰۰۰ بازدید ➔ ۳۵۰ سکه", callback_data="pkg_view_5000_350"),
+            types.InlineKeyboardButton("▫️ بسته ۵: ۱۰,۰۰۰ بازدید ➔ ۶۵۰ سکه", callback_data="pkg_view_10000_650")
+        )
+    elif service_type == "member":
+        markup.add(
+            types.InlineKeyboardButton("▫️ بسته ۱: ۵۰ ممبر ➔ ۱۰۰ سکه", callback_data="pkg_member_50_100"),
+            types.InlineKeyboardButton("▫️ بسته ۲: ۱۰۰ ممبر ➔ ۱۸۰ سکه", callback_data="pkg_member_100_180"),
+            types.InlineKeyboardButton("▫️ بسته ۳: ۲۵۰ ممبر ➔ ۴۰۰ سکه", callback_data="pkg_member_250_400"),
+            types.InlineKeyboardButton("▫️ بسته ۴: ۵۰۰ ممبر ➔ ۷۵۰ سکه", callback_data="pkg_member_500_750"),
+            types.InlineKeyboardButton("▫️ بسته ۵: ۱,۰۰۰ ممبر ➔ ۱,۴۰۰ سکه", callback_data="pkg_member_1000_1400")
+        )
+    markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_action"))
+    return markup
+
 def cancel_inline_keyboard():
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_action"))
+    return markup
+
+def admin_panel_keyboard():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📊 آمار ربات", "📢 همگانی / پیام عمومی")
+    markup.add("⚙️ تنظیمات سکه و هدیه", "💳 تنظیم شماره کارت")
+    markup.add("🔙 بازگشت به منوی اصلی")
     return markup
