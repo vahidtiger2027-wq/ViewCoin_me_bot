@@ -11,7 +11,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Bot is running!"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -48,7 +48,7 @@ def check_sponsorship(user_id):
 
 def send_welcome_menu(user_id):
     is_admin = user_id in config.ADMIN_IDS
-    welcome_text = database.get_setting("welcome_message") or "به ربات خوش آمدید!"
+    welcome_text = database.get_setting("welcome_message") or "به ربات ممبرگیر و ویوگیر خوش آمدید!"
     markup = keyboards.main_menu_keyboard(is_admin=is_admin)
     bot.send_message(user_id, welcome_text, reply_markup=markup)
 
@@ -129,17 +129,16 @@ def profile_handler(message):
         )
         bot.send_message(user_id, text, parse_mode="Markdown")
 
-# --- 🛒 فروشگاه سکه و الماس (شفاف با جزئیات کامل) ---
+# --- 🛒 فروشگاه ---
 @bot.message_handler(func=lambda msg: msg.text == "🛒 فروشگاه")
 def shop_handler(message):
     card_number = database.get_setting("card_number") or "ثبت نشده"
-    
     shop_text = (
         "🛒 **فروشگاه سکه و الماس**\n\n"
         "برای خرید هر بسته، مبلغ مربوطه را به شماره کارت زیر واریز کرده و به پشتیبانی پیام دهید:\n\n"
         "📦 **بسته‌های سکه:**\n"
         "▫️ بسته ۱: ۵۰۰ سکه ➔ ۲۵,۰۰۰ تومان\n"
-        "▫️ بسته ۲: ۱,۰۰۰ سکه ➔ ۴۵,۰۰0 تومان\n"
+        "▫️ بسته ۲: ۱,۰۰۰ سکه ➔ ۴۵,۰۰۰ تومان\n"
         "▫️ بسته ۳: ۲,۵۰۰ سکه ➔ ۱۰۰,۰۰۰ تومان\n"
         "▫️ بسته ۴: ۵,۰۰۰ سکه ➔ ۱۸۰,۰۰۰ تومان\n"
         "▫️ بسته ۵: ۱۰,۰۰۰ سکه ➔ ۳۲۰,۰۰۰ تومان\n\n"
@@ -147,32 +146,111 @@ def shop_handler(message):
         "▫️ بسته ۱: ۱۰ الماس ➔ ۱۵,۰۰۰ تومان\n"
         "▫️ بسته ۲: ۲۵ الماس ➔ ۳۰,۰۰۰ تومان\n"
         "▫️ بسته ۳: ۵۰ الماس ➔ ۵۵,۰۰۰ تومان\n"
-        "▫️ بسته ۴: ۱۰۰ الماس ➔ ۱۰۰,۰۰۰ تومان\n"
+        "▫️️ بسته ۴: ۱۰۰ الماس ➔ ۱۰۰,۰۰۰ تومان\n"
         "▫️ بسته ۵: ۲۵۰ الماس ➔ ۲۲۰,۰۰۰ تومان\n\n"
         f"💳 **شماره کارت جهت واریز:**\n`{card_number}`"
     )
     bot.send_message(message.chat.id, shop_text, parse_mode="Markdown")
 
-# --- 👁‍‍🗨 ثبت سفارش ویو و ممبر (شفاف با قیمت و تعداد) ---
+# --- 👁‍‍🗨 ثبت سفارش (دکمه‌های شیشه‌ای تفکیک‌شده) ---
 @bot.message_handler(func=lambda msg: msg.text == "👁‍🗨 ثبت سفارش ویو و ممبر")
-def order_handler(message):
-    order_text = (
-        "👁‍🗨 **ثبت سفارش خدمات (ویو و ممبر)**\n\n"
-        "لطفاً بسته مورد نظر خود را بررسی و انتخاب کنید:\n\n"
-        "🔹 **بسته‌های بازدید (ویو):**\n"
-        "▫️ بسته ۱: ۱۰۰ بازدید ➔ ۱۰ سکه\n"
-        "▫️ بسته ۲: ۵۰۰ بازدید ➔ ۴۵ سکه\n"
-        "▫️ بسته ۳: ۱,۰۰۰ بازدید ➔ ۸۰ سکه\n"
-        "▫️ بسته ۴: ۵,۰۰۰ بازدید ➔ ۳۵۰ سکه\n"
-        "▫️ بسته ۵: ۱۰,۰۰۰ بازدید ➔ ۶۵۰ سکه\n\n"
-        "👥 **بسته‌های اعضا (ممبر):**\n"
-        "▫️ بسته ۱: ۵۰ ممبر ➔ ۱۰۰ سکه\n"
-        "▫️ بسته ۲: ۱۰۰ ممبر ➔ ۱۸۰ سکه\n"
-        "▫️ بسته ۳: ۲۵۰ ممبر ➔ ۴۰۰ سکه\n"
-        "▫️ بسته ۴: ۵۰۰ ممبر ➔ ۷۵۰ سکه\n"
-        "▫️ بسته ۵: ۱,۰۰۰ ممبر ➔ ۱,۴۰۰ سکه"
+def order_start(message):
+    bot.send_message(
+        message.chat.id,
+        "👁‍🗨 **ثبت سفارش جدید**\n\nلطفاً نوع خدمت درخواستی خود را انتخاب کنید:",
+        reply_markup=keyboards.order_type_keyboard(),
+        parse_mode="Markdown"
     )
-    bot.send_message(message.chat.id, order_text, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("order_type_"))
+def order_type_selected(call):
+    service_type = call.data.replace("order_type_", "")
+    title = "بازدید (ویو)" if service_type == "view" else "اعضا (ممبر)"
+    bot.edit_message_text(
+        f"📦 **لیست بسته‌های {title}**\n\nلطفاً یکی از بسته‌های زیر را انتخاب کنید:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboards.order_packages_keyboard(service_type),
+        parse_mode="Markdown"
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pkg_"))
+def package_selected(call):
+    parts = call.data.split("_")
+    service_type = parts[1]
+    amount = int(parts[2])
+    cost = int(parts[3])
+    user_id = call.from_user.id
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+    user_coins = cursor.fetchone()['coins']
+    conn.close()
+
+    if user_coins < cost:
+        bot.answer_callback_query(call.id, f"❌ موجودی سکه شما کافی نیست! (نیاز به {cost} سکه داری، اما موجودیت {user_coins} سکه‌ست)", show_alert=True)
+        return
+
+    user_states[user_id] = {
+        "step": "wait_link",
+        "service_type": service_type,
+        "amount": amount,
+        "cost": cost
+    }
+
+    target_title = "لینک پست تلگرام" if service_type == "view" else "لینک عمومی یا آیدی کانال (مثلاً @channel)"
+    bot.edit_message_text(
+        f"✅ بسته انتخابی: **{amount} {'بازدید' if service_type == 'view' else 'ممبر'}**\n"
+        f"💰 هزینه: **{cost} سکه**\n\n"
+        f"🔗 لطفاً **{target_title}** خود را ارسال کنید:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboards.cancel_inline_keyboard(),
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(func=lambda msg: user_states.get(msg.from_user.id, {}).get("step") == "wait_link")
+def receive_order_link(message):
+    user_id = message.from_user.id
+    target_link = message.text.strip()
+    state = user_states[user_id]
+
+    service_type = state["service_type"]
+    amount = state["amount"]
+    cost = state["cost"]
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+    user_coins = cursor.fetchone()['coins']
+
+    if user_coins < cost:
+        bot.send_message(user_id, "❌ موجودی سکه شما کافی نیست!")
+        del user_states[user_id]
+        conn.close()
+        return
+
+    cursor.execute("UPDATE users SET coins = coins - ? WHERE user_id = ?", (cost, user_id))
+    cursor.execute("INSERT INTO orders (user_id, service_type, amount, cost, target_link) VALUES (?, ?, ?, ?, ?)",
+                   (user_id, service_type, amount, cost, target_link))
+    conn.commit()
+    order_id = cursor.lastrowid
+    conn.close()
+
+    del user_states[user_id]
+
+    service_name = "بازدید" if service_type == "view" else "ممبر"
+    success_text = (
+        f"🎉 **سفارش شما با موفقیت ثبت شد!**\n\n"
+        f"🆔 **کد پیگیری:** `{order_id}`\n"
+        f"📌 **نوع سفارش:** {service_name}\n"
+        f"🔢 **تعداد:** {amount}\n"
+        f"💳 **سکه‌ی کسر شده:** {cost}\n"
+        f"🔗 **لینک ثبت شده:** {target_link}\n\n"
+        f"⚡ سفارش شما به زودی پردازش و اعمال خواهد شد."
+    )
+    bot.send_message(user_id, success_text, parse_mode="Markdown")
 
 # --- 👥 زیرمجموعه‌گیری ---
 @bot.message_handler(func=lambda msg: msg.text == "👥 زیرمجموعه‌گیری")
@@ -215,9 +293,9 @@ def lottery_handler(message):
     if status == "off":
         bot.send_message(message.chat.id, "❌ در حال حاضر قرعه‌کشی فعال نیست.")
     else:
-        p1 = database.get_setting("lottery_prize_1")
-        p2 = database.get_setting("lottery_prize_2")
-        p3 = database.get_setting("lottery_prize_3")
+        p1 = database.get_setting("lottery_prize_1") or "ثبت نشده"
+        p2 = database.get_setting("lottery_prize_2") or "ثبت نشده"
+        p3 = database.get_setting("lottery_prize_3") or "ثبت نشده"
         text = f"🏆 **قرعه‌کشی فعال است!**\n\n🥇 نفر اول: {p1}\n🥈 نفر دوم: {p2}\n🥉 نفر سوم: {p3}"
         bot.send_message(message.chat.id, text, parse_mode="Markdown")
 
@@ -259,7 +337,7 @@ def transfer_get_target(message):
     target_exists = cursor.fetchone()
     conn.close()
     if not target_exists:
-        bot.reply_to(message, "❌ کاربر مقصد یافت نشد.")
+        bot.reply_to(message, "❌ کاربر مقصد در ربات یافت نشد.")
         return
     user_states[user_id]["target_id"] = target_id
     user_states[user_id]["step"] = "wait_amount"
@@ -271,7 +349,7 @@ def transfer_get_amount(message):
     user_id = message.from_user.id
     amount_str = message.text.strip()
     if not amount_str.isdigit() or int(amount_str) <= 0:
-        bot.reply_to(message, "❌ عدد معتبر نیست.")
+        bot.reply_to(message, "❌ عدد وارد شده معتبر نیست.")
         return
     amount = int(amount_str)
     state = user_states[user_id]
@@ -285,7 +363,7 @@ def transfer_get_amount(message):
     cursor.execute(f"SELECT {column} FROM users WHERE user_id = ?", (user_id,))
     user_balance = cursor.fetchone()[column]
     if user_balance < amount:
-        bot.reply_to(message, f"❌ موجودی کافی نیست! (موجودی: {user_balance} {asset_title})")
+        bot.reply_to(message, f"❌ موجودی کافی نیست! (موجودی شما: {user_balance} {asset_title})")
         conn.close()
         return
 
@@ -304,6 +382,19 @@ def admin_panel_handler(message):
         markup = keyboards.admin_panel_keyboard()
         bot.send_message(message.chat.id, "⚙️ به **پنل مدیریت** خوش آمدید:", reply_markup=markup, parse_mode="Markdown")
 
+@bot.message_handler(func=lambda msg: msg.text == "📊 آمار ربات")
+def admin_stats(message):
+    if message.from_user.id in config.ADMIN_IDS:
+        conn = database.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as total FROM users")
+        total_users = cursor.fetchone()['total']
+        cursor.execute("SELECT COUNT(*) as total_orders FROM orders")
+        total_orders = cursor.fetchone()['total_orders']
+        conn.close()
+        
+        bot.send_message(message.chat.id, f"📊 **آمار ربات:**\n\n👥 کل کاربران: {total_users} نفر\n📦 کل سفارشات: {total_orders} عدد", parse_mode="Markdown")
+
 @bot.message_handler(func=lambda msg: msg.text == "🔙 بازگشت به منوی اصلی")
 def back_to_main_handler(message):
     send_welcome_menu(message.from_user.id)
@@ -318,5 +409,5 @@ def cancel_callback(call):
 if __name__ == "__main__":
     database.init_db()
     keep_alive()
-    print("ربات روشن و فعال شد...")
+    print("ربات به‌طور کامل و بدون ایراد فعال شد...")
     bot.infinity_polling()
