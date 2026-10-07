@@ -120,4 +120,4 @@ if __name__ == "__main__":
     keep_alive()
     print("ربات روشن شد...")
     bot.infinity_polling()
-if __name__ == "__main__":
+
