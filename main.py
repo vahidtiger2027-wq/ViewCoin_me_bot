@@ -26,7 +26,8 @@ bot = telebot.TeleBot(config.BOT_TOKEN)
 # منوی اصلی ربات (شامل هدیه روزانه و جذب زیرمجموعه)
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("حصاب کاربری 🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
+    markup.add("🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
+    markup.add("👤 حساب کاربری")
     return markup
 
 # دستور استارت (همراه با سیستم زیرمجموعه‌گیری)
