@@ -67,36 +67,3 @@ if __name__ == "__main__":
     keep_alive()
     print("ربات روشن شد...")
     bot.infinity_polling()
-# ---------- تنظیمات دکمه جذب زیرمجموعه ----------
-LINK_VIEW_CHANNEL = "https://t.me/view_sin_channel"     # لینک ویو گیر چنل
-LINK_MEMBER_CHANNEL = "https://t.me/my_member_man"      # لینک ممبر گیر چنل
-LINK_BOT = "https://t.me/ViewCoin_me_bot"               # لینک ربات ویو گیر ممبر گیر
-
-REWARD_COINS = "۳۰۰"      # سکه به ازای هر نفر
-REWARD_DIAMONDS = "۵۰"    # الماس به ازای هر نفر
-
-RECRUIT_TEXT = f"""
-🎯 جذب زیرمجموعه
-
-🔗 ویو گیر چنل:
-{LINK_VIEW_CHANNEL}
-
-🔗 ممبر گیر چنل:
-{LINK_MEMBER_CHANNEL}
-
-🤖 ربات ویو گیر و ممبر گیر:
-{LINK_BOT}
-
-🎁 جوایز معرفی هر نفر:
-🪙 سکه: {REWARD_COINS}
-💎 الماس: {REWARD_DIAMONDS}
-"""
-
-# ---------- دکمه: جذب زیرمجموعه ----------
-@bot.message_handler(func=lambda m: m.text == "💰 جذب زیرمجموعه")
-def recruit_menu(message):
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("👁 ویو گیر چنل", url=LINK_VIEW_CHANNEL))
-    markup.add(telebot.types.InlineKeyboardButton("👥 ممبر گیر چنل", url=LINK_MEMBER_CHANNEL))
-    markup.add(telebot.types.InlineKeyboardButton("🤖 ربات ویو گیر ممبر گیر", url=LINK_BOT))
-    bot.send_message(message.chat.id, RECRUIT_TEXT, reply_markup=markup)
