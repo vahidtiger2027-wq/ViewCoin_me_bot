@@ -188,10 +188,194 @@ def account_handler(message):
             f"💰 **پورسانت زیرمجموعه‌گیری:** {referral_commission} سکه"
         )
         bot.send_message(user_id, text, parse_mode="Markdown")
+# ----------------------------------------------------
+# 📌 دکمه ۴: ثبت تبلیغ (ویوگیر و ممبرگیر)
+# ----------------------------------------------------
+user_ad_data = {}  # ذخیره موقت داده‌های ثبت تبلیغ
 
+@bot.message_handler(func=lambda msg: msg.text == "📥 ثبت تبلیغ")
+def ad_menu_handler(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_view = types.InlineKeyboardButton("👁 ثبت تبلیغ ویوگیر", callback_data="add_view_ad")
+    btn_member = types.InlineKeyboardButton("📢 ثبت تبلیغ ممبرگیر", callback_data="add_member_ad")
+    markup.add(btn_view, btn_member)
+    bot.send_message(message.chat.id, "لطفاً نوع تبلیغ مورد نظر خود را انتخاب کنید:", reply_markup=markup)
+
+# --- بخش ویوگیر ---
+@bot.callback_query_handler(func=lambda call: call.data == "add_view_ad")
+def view_packages_callback(call):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    packages = [
+        ("۴۰ سکه 👈 ۴۰ ویو", "pkg_view_40_40"),
+        ("۵۰ سکه 👈 ۵۰ ویو", "pkg_view_50_50"),
+        ("۱۰۰ سکه 👈 ۱۰۰ ویو", "pkg_view_100_100"),
+        ("۲۰۰ سکه 👈 ۲۰۰ ویو", "pkg_view_200_200")
+    ]
+    for text, cd in packages:
+        markup.add(types.InlineKeyboardButton(text, callback_data=cd))
+    
+    bot.edit_message_text("بسته ویوگیر مورد نظر را انتخاب کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pkg_view_"))
+def process_view_package(call):
+    _, _, cost, views = call.data.split("_")
+    cost, views = int(cost), int(views)
+    user_id = call.from_user.id
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+    user_coins = cursor.fetchone()['coins']
+    conn.close()
+
+    if user_coins < cost:
+        bot.answer_callback_query(call.id, f"❌ موجودی سکه کافی نیست! (نیازمند {cost} سکه)", show_alert=True)
+        return
+
+    user_ad_data[user_id] = {'type': 'view', 'cost': cost, 'target': views}
+    msg = bot.send_message(call.message.chat.id, "📌 لطفاً پست مورد نظر خود را (متن، عکس، ویدیو، لینک و...) فوروارد یا ارسال کنید:")
+    bot.register_next_step_handler(msg, receive_view_post)
+
+def receive_view_post(message):
+    user_id = message.from_user.id
+    if user_id not in user_ad_data:
+        return
+
+    user_ad_data[user_id]['message_id'] = message.message_id
+    user_ad_data[user_id]['chat_id'] = message.chat.id
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ تأیید و ثبت پست", callback_data="confirm_view_ad"))
+    markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_ad"))
+
+    bot.reply_to(message, "آیا از ثبت این پست اطمینان دارید؟", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "confirm_view_ad")
+def confirm_view_ad_callback(call):
+    user_id = call.from_user.id
+    data = user_ad_data.get(user_id)
+    if not data:
+        return
+
+    # کسر سکه
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET coins = coins - ?, spent_coins = spent_coins + ? WHERE user_id = ?", (data['cost'], data['cost'], user_id))
+    conn.commit()
+    conn.close()
+
+    bot_info = bot.get_me()
+    view_channel = database.get_setting("view_channel") or "@ViewCoin_me_bot"
+
+    # دکمه‌های شیشه‌ای زیر پست در کانال ویو
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_back = types.InlineKeyboardButton("🔄 برگشت به ربات", url=f"https://t.me/{bot_info.username}")
+    btn_turbo = types.InlineKeyboardButton("⚡ توربو", callback_data="turbo_view")
+    btn_claim = types.InlineKeyboardButton("👁 ثبت بازدید", callback_data="claim_view")
+    markup.add(btn_claim)
+    markup.add(btn_back, btn_turbo)
+
+    try:
+        bot.copy_message(view_channel, data['chat_id'], data['message_id'], reply_markup=markup)
+        bot.edit_message_text("🎉 پست شما با موفقیت ثبت شد و به کانال ارسال گردید!", call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"❌ خطا در ارسال به کانال ({view_channel}). لطفاً مطمئن شوید ربات در کانال ادمین است.", call.message.chat.id, call.message.message_id)
+
+    del user_ad_data[user_id]
+
+# --- بخش ممبرگیر ---
+@bot.callback_query_handler(func=lambda call: call.data == "add_member_ad")
+def member_packages_callback(call):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    packages = [
+        ("۲۰ سکه 👈 ۱۰ ممبر", "pkg_mem_20_10"),
+        ("۴۰ سکه 👈 ۲۰ ممبر", "pkg_mem_40_20"),
+        ("۶۰ سکه 👈 ۳۰ ممبر", "pkg_mem_60_30"),
+        ("۸۰ سکه 👈 ۴۰ ممبر", "pkg_mem_80_40"),
+        ("۱۰۰ سکه 👈 ۵۰ ممبر", "pkg_mem_100_50")
+    ]
+    for text, cd in packages:
+        markup.add(types.InlineKeyboardButton(text, callback_data=cd))
+    
+    bot.edit_message_text("بسته ممبرگیر مورد نظر را انتخاب کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pkg_mem_"))
+def process_member_package(call):
+    _, _, cost, members = call.data.split("_")
+    cost, members = int(cost), int(members)
+    user_id = call.from_user.id
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,))
+    user_coins = cursor.fetchone()['coins']
+    conn.close()
+
+    if user_coins < cost:
+        bot.answer_callback_query(call.id, f"❌ موجودی سکه کافی نیست! (نیازمند {cost} سکه)", show_alert=True)
+        return
+
+    user_ad_data[user_id] = {'type': 'member', 'cost': cost, 'target': members}
+    msg = bot.send_message(call.message.chat.id, "📌 لطفاً پست یا بنر تبلیغاتی همراه با لینک کانال خود را بفرستید:")
+    bot.register_next_step_handler(msg, receive_member_post)
+
+def receive_member_post(message):
+    user_id = message.from_user.id
+    if user_id not in user_ad_data:
+        return
+
+    user_ad_data[user_id]['message_id'] = message.message_id
+    user_ad_data[user_id]['chat_id'] = message.chat.id
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("✅ تأیید و ثبت لینک", callback_data="confirm_member_ad"))
+    markup.add(types.InlineKeyboardButton("❌ انصراف", callback_data="cancel_ad"))
+
+    bot.reply_to(message, "آیا از ثبت این تبلیغ ممبرگیر اطمینان دارید؟", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "confirm_member_ad")
+def confirm_member_ad_callback(call):
+    user_id = call.from_user.id
+    data = user_ad_data.get(user_id)
+    if not data:
+        return
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET coins = coins - ?, spent_coins = spent_coins + ? WHERE user_id = ?", (data['cost'], data['cost'], user_id))
+    conn.commit()
+    conn.close()
+
+    bot_info = bot.get_me()
+    member_channel = database.get_setting("member_channel") or "@ViewCoin_me_bot"
+
+    # دکمه‌های شیشه‌ای زیر پست در کانال ممبرگیر
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_join = types.InlineKeyboardButton("📢 جوین در کانال", callback_data="join_channel_target")
+    btn_diamond = types.InlineKeyboardButton("💎 دریافت الماس", callback_data="claim_member_diamond")
+    btn_back = types.InlineKeyboardButton("🔄 بازگشت به ربات", url=f"https://t.me/{bot_info.username}")
+    markup.add(btn_join, btn_diamond)
+    markup.add(btn_back)
+
+    try:
+        bot.copy_message(member_channel, data['chat_id'], data['message_id'], reply_markup=markup)
+        bot.edit_message_text("🎉 تبلیغ ممبرگیر شما با موفقیت ثبت شد و به کانال ارسال گردید!", call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        bot.edit_message_text(f"❌ خطا در ارسال به کانال ({member_channel}). لطفاً مطمئن شوید ربات در کانال ادمین است.", call.message.chat.id, call.message.message_id)
+
+    del user_ad_data[user_id]
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_ad")
+def cancel_ad_callback(call):
+    user_id = call.from_user.id
+    if user_id in user_ad_data:
+        del user_ad_data[user_id]
+    bot.edit_message_text("❌ ثبت تبلیغ لغو شد.", call.message.chat.id, call.message.message_id)
 # ----------------------------------------------------
 # اجرای ربات
+
 # ----------------------------------------------------
+
 if __name__ == "__main__":
     database.init_db()
     patch_database()  # ستون‌های جدید دیتابیس را بررسی و اضافه می‌کند
