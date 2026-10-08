@@ -51,8 +51,9 @@ def patch_database():
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
-    markup.add("👤 حساب کاربری")
+    markup.add("👤 حساب کاربری", "📥 ثبت تبلیغ")
     return markup
+
 
 # ----------------------------------------------------
 # دستور استارت (همراه با سیستم زیرمجموعه‌گیری)
