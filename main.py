@@ -23,15 +23,18 @@ def keep_alive():
 
 bot = telebot.TeleBot(config.BOT_TOKEN)
 
-# منوی اصلی ربات (شامل هدیه روزانه و جذب زیرمجموعه)
+# ----------------------------------------------------
+# منوی اصلی ربات
+# ----------------------------------------------------
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
     markup.add("👤 حساب کاربری")
     return markup
 
-    
+# ----------------------------------------------------
 # دستور استارت (همراه با سیستم زیرمجموعه‌گیری)
+# ----------------------------------------------------
 @bot.message_handler(commands=['start'])
 def start_command(message):
     user_id = message.from_user.id
@@ -117,11 +120,6 @@ def referral_handler(message):
     )
     bot.send_message(user_id, text, parse_mode="Markdown")
 
-if __name__ == "__main__":
-    database.init_db()
-    keep_alive()
-    print("ربات روشن شد...")
-    bot.infinity_polling()
 # ----------------------------------------------------
 # 📌 دکمه ۳: حساب کاربری
 # ----------------------------------------------------
@@ -133,7 +131,6 @@ def account_handler(message):
     conn = database.get_connection()
     cursor = conn.cursor()
     
-    # دریافت اطلاعات کلی کاربر
     cursor.execute("""
         SELECT coins, diamonds, tickets, 
                COALESCE(spent_coins, 0) as spent_coins, 
@@ -146,9 +143,9 @@ def account_handler(message):
     """, (user_id,))
     user = cursor.fetchone()
     
-    # تعداد زیرمجموعه‌ها
     cursor.execute("SELECT COUNT(*) as ref_count FROM users WHERE referrer_id = ?", (user_id,))
-    ref_count = cursor.fetchone()['ref_count']
+    ref_count_res = cursor.fetchone()
+    ref_count = ref_count_res['ref_count'] if ref_count_res else 0
     
     conn.close()
 
@@ -170,3 +167,11 @@ def account_handler(message):
         )
         bot.send_message(user_id, text, parse_mode="Markdown")
 
+# ----------------------------------------------------
+# اجرای ربات
+# ----------------------------------------------------
+if __name__ == "__main__":
+    database.init_db()
+    keep_alive()
+    print("ربات روشن شد...")
+    bot.infinity_polling()
