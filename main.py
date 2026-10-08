@@ -169,8 +169,4 @@ def account_handler(message):
             f"💰 **پورسانت زیرمجموعه‌گیری:** {user['referral_commission']} سکه"
         )
         bot.send_message(user_id, text, parse_mode="Markdown")
-if __name__ == "__main__":
-    database.init_db()
-    keep_alive()
-    print("... ربات روشن شد")
-    bot.infinity_polling()
+
