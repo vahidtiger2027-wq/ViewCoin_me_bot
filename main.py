@@ -119,21 +119,47 @@ def start_command(message):
     bot.send_message(user_id, "به ربات خوش آمدید! لطفاً از منوی زیر استفاده کنید:", reply_markup=get_main_menu())
 
 # ----------------------------------------------------
-# 📌 دکمه ۱: هدیه روزانه
+# 📌 دکمه ۱: هدیه روزانه (با محدودیت ۲۴ ساعته / یک‌بار در روز)
 # ----------------------------------------------------
+from datetime import date
+
 @bot.message_handler(func=lambda msg: msg.text == "🎁 هدیه روزانه")
 def daily_reward_handler(message):
     user_id = message.from_user.id
-    daily_coin = int(database.get_setting("daily_coin") or 100)
-    daily_diamond = int(database.get_setting("daily_diamond") or 5)
+    today_str = str(date.today())
 
     conn = database.get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET coins = coins + ?, diamonds = diamonds + ? WHERE user_id = ?", (daily_coin, daily_diamond, user_id))
+
+    # بررسی ستون last_daily
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_daily TEXT")
+        conn.commit()
+    except Exception:
+        pass
+
+    cursor.execute("SELECT last_daily FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    last_daily = row['last_daily'] if row and 'last_daily' in row.keys() else None
+
+    if last_daily == today_str:
+        conn.close()
+        bot.send_message(user_id, "❌ **شما امروز هدیه روزانه خود را دریافت کرده‌اید!**\nلطفاً فردا دوباره مراجعه کنید.", parse_mode="Markdown")
+        return
+
+    daily_coin = int(database.get_setting("daily_coin") or 100)
+    daily_diamond = int(database.get_setting("daily_diamond") or 5)
+
+    cursor.execute("""
+        UPDATE users 
+        SET coins = coins + ?, diamonds = diamonds + ?, last_daily = ? 
+        WHERE user_id = ?
+    """, (daily_coin, daily_diamond, today_str, user_id))
     conn.commit()
     conn.close()
 
     bot.send_message(user_id, f"🎉 **هدیه روزانه دریافت شد!**\n\n🟡 {daily_coin} سکه\n💎 {daily_diamond} الماس\nبه حساب شما اضافه شد.", parse_mode="Markdown")
+
 
 # ----------------------------------------------------
 # 📌 دکمه ۲: جذب زیرمجموعه
