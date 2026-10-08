@@ -24,6 +24,28 @@ def keep_alive():
 bot = telebot.TeleBot(config.BOT_TOKEN)
 
 # ----------------------------------------------------
+# تابع بررسی و افزودن ستون‌های ناقص به دیتابیس
+# ----------------------------------------------------
+def patch_database():
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    columns_to_add = [
+        ("spent_coins", "INTEGER DEFAULT 0"),
+        ("spent_diamonds", "INTEGER DEFAULT 0"),
+        ("views_done", "INTEGER DEFAULT 0"),
+        ("joins_done", "INTEGER DEFAULT 0"),
+        ("rewards_received", "INTEGER DEFAULT 0"),
+        ("referral_commission", "INTEGER DEFAULT 0")
+    ]
+    for col_name, col_type in columns_to_add:
+        try:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+        except Exception:
+            pass  # اگر ستون از قبل وجود داشت، خطا را نادیده بگیر
+    conn.commit()
+    conn.close()
+
+# ----------------------------------------------------
 # منوی اصلی ربات
 # ----------------------------------------------------
 def get_main_menu():
@@ -41,7 +63,6 @@ def start_command(message):
     args = message.text.split()
     referrer_id = None
     
-    # بررسی لینک دعوت
     if len(args) > 1 and args[1].isdigit():
         possible_ref = int(args[1])
         if possible_ref != user_id:
@@ -56,7 +77,6 @@ def start_command(message):
         cursor.execute("INSERT INTO users (user_id, referrer_id) VALUES (?, ?)", (user_id, referrer_id))
         conn.commit()
         
-        # اعطای پاداش به فرد دعوت‌کننده
         if referrer_id:
             ref_coin = int(database.get_setting("referral_coin") or 200)
             ref_diamond = int(database.get_setting("referral_diamond") or 50)
@@ -131,39 +151,41 @@ def account_handler(message):
     conn = database.get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("""
-        SELECT coins, diamonds, tickets, 
-               COALESCE(spent_coins, 0) as spent_coins, 
-               COALESCE(spent_diamonds, 0) as spent_diamonds,
-               COALESCE(views_done, 0) as views_done,
-               COALESCE(joins_done, 0) as joins_done,
-               COALESCE(rewards_received, 0) as rewards_received,
-               COALESCE(referral_commission, 0) as referral_commission
-        FROM users WHERE user_id = ?
-    """, (user_id,))
-    user = cursor.fetchone()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    user_row = cursor.fetchone()
     
     cursor.execute("SELECT COUNT(*) as ref_count FROM users WHERE referrer_id = ?", (user_id,))
-    ref_count_res = cursor.fetchone()
-    ref_count = ref_count_res['ref_count'] if ref_count_res else 0
+    ref_res = cursor.fetchone()
+    ref_count = ref_res['ref_count'] if ref_res else 0
     
     conn.close()
 
-    if user:
+    if user_row:
+        user = dict(user_row)
+        coins = user.get('coins', 0)
+        diamonds = user.get('diamonds', 0)
+        tickets = user.get('tickets', 0)
+        spent_coins = user.get('spent_coins', 0) or 0
+        spent_diamonds = user.get('spent_diamonds', 0) or 0
+        views_done = user.get('views_done', 0) or 0
+        joins_done = user.get('joins_done', 0) or 0
+        rewards_received = user.get('rewards_received', 0) or 0
+        referral_commission = user.get('referral_commission', 0) or 0
+
         text = (
             f"👤 **حساب کاربری شما**\n\n"
             f"👤 **نام:** {first_name}\n"
             f"🆔 **آیدی عددی:** `{user_id}`\n\n"
-            f"🟡 **موجودی سکه:** {user['coins']}\n"
-            f"💎 **موجودی الماس:** {user['diamonds']}\n"
-            f"🎟 **تعداد بلیت‌های قرعه‌کشی:** {user['tickets']}\n\n"
-            f"💸 **سکه‌های خرج‌شده:** {user['spent_coins']}\n"
-            f"💎 **الماس‌های خرج‌شده:** {user['spent_diamonds']}\n\n"
-            f"👁 **بازدیدهای شما:** {user['views_done']}\n"
-            f"➕ **جوین‌های شما:** {user['joins_done']}\n"
-            f"🎁 **جوایز دریافتی:** {user['rewards_received']}\n\n"
+            f"🟡 **موجودی سکه:** {coins}\n"
+            f"💎 **موجودی الماس:** {diamonds}\n"
+            f"🎟 **تعداد بلیت‌های قرعه‌کشی:** {tickets}\n\n"
+            f"💸 **سکه‌های خرج‌شده:** {spent_coins}\n"
+            f"💎 **الماس‌های خرج‌شده:** {spent_diamonds}\n\n"
+            f"👁 **بازدیدهای شما:** {views_done}\n"
+            f"➕ **جوین‌های شما:** {joins_done}\n"
+            f"🎁 **جوایز دریافتی:** {rewards_received}\n\n"
             f"👥 **تعداد زیرمجموعه‌ها:** {ref_count} نفر\n"
-            f"💰 **پورسانت زیرمجموعه‌گیری:** {user['referral_commission']} سکه"
+            f"💰 **پورسانت زیرمجموعه‌گیری:** {referral_commission} سکه"
         )
         bot.send_message(user_id, text, parse_mode="Markdown")
 
@@ -172,6 +194,7 @@ def account_handler(message):
 # ----------------------------------------------------
 if __name__ == "__main__":
     database.init_db()
+    patch_database()  # ستون‌های جدید دیتابیس را بررسی و اضافه می‌کند
     keep_alive()
     print("ربات روشن شد...")
     bot.infinity_polling()
