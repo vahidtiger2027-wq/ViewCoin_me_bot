@@ -409,6 +409,111 @@ def cancel_ad_callback(call):
     if user_id in user_ad_data:
         del user_ad_data[user_id]
     bot.edit_message_text("❌ ثبت تبلیغ لغو شد.", call.message.chat.id, call.message.message_id)
+# ----------------------------------------------------
+# 📌 دکمه ۵: انتقال سکه و الماس
+# ----------------------------------------------------
+user_transfer_data = {}  # ذخیره موقت داده‌های انتقال
+
+@bot.message_handler(func=lambda msg: msg.text == "🔄 انتقال سکه و الماس")
+def transfer_menu_handler(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_coin = types.InlineKeyboardButton("🟡 انتقال سکه", callback_data="tr_coin")
+    btn_diamond = types.InlineKeyboardButton("💎 انتقال الماس", callback_data="tr_diamond")
+    markup.add(btn_coin, btn_diamond)
+    bot.send_message(message.chat.id, "لطفاً نوع دارایی جهت انتقال را انتخاب کنید:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data in ["tr_coin", "tr_diamond"])
+def transfer_type_selected(call):
+    asset_type = "coin" if call.data == "tr_coin" else "diamond"
+    asset_title = "سکه" if asset_type == "coin" else "الماس"
+    
+    user_transfer_data[call.from_user.id] = {'type': asset_type}
+    
+    msg = bot.send_message(call.message.chat.id, f"لطفاً **آیدی عددی** کاربر گیرنده {asset_title} را وارد کنید:")
+    bot.register_next_step_handler(msg, receive_transfer_target_id)
+
+def receive_transfer_target_id(message):
+    user_id = message.from_user.id
+    target_id_str = message.text.strip()
+
+    if not target_id_str.isdigit():
+        bot.reply_to(message, "❌ آیدی عددی معتبر نیست! لطفاً فقط عدد بفرستید.")
+        if user_id in user_transfer_data:
+            del user_transfer_data[user_id]
+        return
+
+    target_id = int(target_id_str)
+
+    if target_id == user_id:
+        bot.reply_to(message, "❌ شما نمی‌توانید به حساب خودتان انتقال انجام دهید!")
+        if user_id in user_transfer_data:
+            del user_transfer_data[user_id]
+        return
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
+    target_user = cursor.fetchone()
+    conn.close()
+
+    if not target_user:
+        bot.reply_to(message, "❌ کاربر گیرنده در ربات ثبت‌نام نکرده است!")
+        if user_id in user_transfer_data:
+            del user_transfer_data[user_id]
+        return
+
+    user_transfer_data[user_id]['target_id'] = target_id
+    asset_title = "سکه" if user_transfer_data[user_id]['type'] == "coin" else "الماس"
+    
+    msg = bot.send_message(message.chat.id, f"مقدار **{asset_title}** جهت انتقال را وارد کنید:")
+    bot.register_next_step_handler(msg, process_transfer_amount)
+
+def process_transfer_amount(message):
+    user_id = message.from_user.id
+    amount_str = message.text.strip()
+
+    if user_id not in user_transfer_data:
+        return
+
+    if not amount_str.isdigit() or int(amount_str) <= 0:
+        bot.reply_to(message, "❌ مقدار وارد شده معتبر نیست!")
+        del user_transfer_data[user_id]
+        return
+
+    amount = int(amount_str)
+    data = user_transfer_data[user_id]
+    asset_type = data['type']
+    target_id = data['target_id']
+    
+    column = "coins" if asset_type == "coin" else "diamonds"
+    asset_title = "سکه" if asset_type == "coin" else "الماس"
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT {column} FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    user_balance = row[column] if row else 0
+
+    if user_balance < amount:
+        bot.reply_to(message, f"❌ موجودی شما کافی نیست! (موجودی فعلی شما: {user_balance} {asset_title})")
+        conn.close()
+        del user_transfer_data[user_id]
+        return
+
+    # انجام کسر از فرستنده و اضافه به گیرنده
+    cursor.execute(f"UPDATE users SET {column} = {column} - ? WHERE user_id = ?", (amount, user_id))
+    cursor.execute(f"UPDATE users SET {column} = {column} + ? WHERE user_id = ?", (amount, target_id))
+    conn.commit()
+    conn.close()
+
+    del user_transfer_data[user_id]
+
+    bot.send_message(message.chat.id, f"✅ با موفقیت **{amount} {asset_title}** به کاربر `{target_id}` منتقل شد.", parse_mode="Markdown")
+
+    try:
+        bot.send_message(target_id, f"🎁 کاربر `{user_id}` مقدار **{amount} {asset_title}** به حساب شما واریز کرد!", parse_mode="Markdown")
+    except Exception:
+        pass
 
 # ----------------------------------------------------
 # اجرای ربات
