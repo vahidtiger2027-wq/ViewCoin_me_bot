@@ -515,6 +515,173 @@ def process_transfer_amount(message):
         bot.send_message(target_id, f"🎁 کاربر `{user_id}` مقدار **{amount} {asset_title}** به حساب شما واریز کرد!", parse_mode="Markdown")
     except Exception:
         pass
+# ----------------------------------------------------
+# 📌 دکمه ۶: فروشگاه (خرید سکه و الماس)
+# ----------------------------------------------------
+DEFAULT_CARD_NUMBER = "5892.1011.1699.1486"
+user_shop_data = {}  # ذخیره موقت سفارش خریدار
+
+@bot.message_handler(func=lambda msg: msg.text == "🛍️ فروشگاه")
+def shop_menu_handler(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_coin = types.InlineKeyboardButton("👁 خرید سکه ویوگیر", callback_data="shop_coins")
+    btn_diamond = types.InlineKeyboardButton("💎 خرید الماس ممبرگیر", callback_data="shop_diamonds")
+    markup.add(btn_coin, btn_diamond)
+    bot.send_message(message.chat.id, "🛒 **به فروشگاه خوش آمدید!**\nلطفاً نوع آیتم درخواستی خود را انتخاب کنید:", reply_markup=markup, parse_mode="Markdown")
+
+# --- لیست بسته‌های سکه ---
+@bot.callback_query_handler(func=lambda call: call.data == "shop_coins")
+def shop_coins_packages(call):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    packages = [
+        ("۲۰,۰۰۰ سکه 👈 ۵۰,۰۰۰ تومان", "buy_coin_20000_50000"),
+        ("۴۰,۰۰۰ سکه 👈 ۱۰۰,۰۰۰ تومان", "buy_coin_40000_100000"),
+        ("۵۰,۰۰۰ سکه 👈 ۱۵۰,۰۰۰ تومان", "buy_coin_50000_150000"),
+        ("۲۰۰,۰۰۰ سکه 👈 ۲۰۰,۰۰۰ تومان", "buy_coin_200000_200000")
+    ]
+    for text, cd in packages:
+        markup.add(types.InlineKeyboardButton(text, callback_data=cd))
+    bot.edit_message_text("🟡 **بسته‌های سکه ویوگیر:**\nیکی از بسته‌های زیر را انتخاب کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+# --- لیست بسته‌های الماس ---
+@bot.callback_query_handler(func=lambda call: call.data == "shop_diamonds")
+def shop_diamonds_packages(call):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    packages = [
+        ("۱۰۰ الماس 👈 ۲۵,۰۰۰ تومان", "buy_diamond_100_25000"),
+        ("۲۵۰ الماس 👈 ۵۰,۰۰۰ تومان", "buy_diamond_250_50000"),
+        ("۵۰۰ الماس 👈 ۱۰۰,۰۰۰ تومان", "buy_diamond_500_100000"),
+        ("۱,۰۰۰ الماس 👈 ۲۰۰,۰۰۰ تومان", "buy_diamond_1000_200000"),
+        ("۴,۰۰۰ الماس 👈 ۸۰۰,۰۰۰ تومان", "buy_diamond_4000_800000")
+    ]
+    for text, cd in packages:
+        markup.add(types.InlineKeyboardButton(text, callback_data=cd))
+    bot.edit_message_text("💎 **بسته‌های الماس ممبرگیر:**\nیکی از بسته‌های زیر را انتخاب کنید:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+# --- انتخاب روش پرداخت ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
+def select_payment_method(call):
+    parts = call.data.split("_")
+    item_type = parts[1]  # coin یا diamond
+    amount = int(parts[2])
+    price = int(parts[3])
+    
+    user_shop_data[call.from_user.id] = {
+        'item_type': item_type,
+        'amount': amount,
+        'price': price
+    }
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btn_card = types.InlineKeyboardButton("💳 پرداخت کارت به کارت", callback_data="pay_card")
+    btn_gateway = types.InlineKeyboardButton("🔗 پرداخت از طریق درگاه", callback_data="pay_gateway")
+    markup.add(btn_card, btn_gateway)
+
+    item_title = f"{amount:,} سکه" if item_type == "coin" else f"{amount:,} الماس"
+    bot.edit_message_text(
+        f"🛒 **سفارش انتخاب شده:** {item_title}\n"
+        f"💰 **مبلغ قابل پرداخت:** {price:,} تومان\n\n"
+        f"لطفاً روش پرداخت را انتخاب کنید:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+# --- روش کارت به کارت ---
+@bot.callback_query_handler(func=lambda call: call.data == "pay_card")
+def pay_card_handler(call):
+    user_id = call.from_user.id
+    if user_id not in user_shop_data:
+        return
+
+    card_num = database.get_setting("card_number") or DEFAULT_CARD_NUMBER
+    data = user_shop_data[user_id]
+    item_title = f"{data['amount']:,} سکه" if data['item_type'] == "coin" else f"{data['amount']:,} الماس"
+
+    msg_text = (
+        f"💳 **پرداخت کارت به کارت**\n\n"
+        f"📌 سفارش شما: **{item_title}**\n"
+        f"💵 مبلغ: **{data['price']:,} تومان**\n\n"
+        f"💳 **شماره کارت:**\n`{card_num}`\n\n"
+        f"📸 **لطفاً عکس فیش یا تصویر تراکنش واریزی خود را ارسال کنید:**"
+    )
+    
+    msg = bot.send_message(call.message.chat.id, msg_text, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, receive_receipt_photo)
+
+# --- دریافت تصویر فیش ---
+def receive_receipt_photo(message):
+    user_id = message.from_user.id
+    if user_id not in user_shop_data:
+        return
+
+    if not message.photo:
+        bot.reply_to(message, "❌ لطفاً فقط تصویر فیش واریزی را ارسال بفرمایید.")
+        return
+
+    data = user_shop_data[user_id]
+    photo_id = message.photo[-1].file_id
+    item_title = f"{data['amount']:,} سکه" if data['item_type'] == "coin" else f"{data['amount']:,} الماس"
+
+    # ارسال فیش برای ادمین‌ها جهت تایید
+    admin_markup = types.InlineKeyboardMarkup()
+    btn_approve = types.InlineKeyboardButton("✅ تایید و واریز", callback_data=f"approve_receipt_{user_id}_{data['item_type']}_{data['amount']}")
+    btn_reject = types.InlineKeyboardButton("❌ رد فیش", callback_data=f"reject_receipt_{user_id}")
+    admin_markup.add(btn_approve, btn_reject)
+
+    caption = (
+        f"📥 **فیش واریزی جدید!**\n\n"
+        f"👤 کاربر: `{user_id}` (@{message.from_user.username or 'بدون آیدی'})\n"
+        f"📦 سفارش: {item_title}\n"
+        f"💵 مبلغ: {data['price']:,} تومان"
+    )
+
+    for admin_id in config.ADMIN_IDS:
+        try:
+            bot.send_photo(admin_id, photo_id, caption=caption, reply_markup=admin_markup, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    bot.reply_to(message, "✅ **فیش شما با موفقیت برای مدیریت ارسال شد.**\nپس از بررسی و تایید، حساب شما شارژ خواهد شد.", parse_mode="Markdown")
+    del user_shop_data[user_id]
+
+# --- روش درگاه پرداخت ---
+@bot.callback_query_handler(func=lambda call: call.data == "pay_gateway")
+def pay_gateway_handler(call):
+    gateway_url = database.get_setting("gateway_url") or "https://t.me/ViewCoin_me_bot"
+    bot.edit_message_text(f"🔗 جهت پرداخت از طریق درگاه، روی لینک زیر کلیک کنید:\n\n{gateway_url}", call.message.chat.id, call.message.message_id)
+
+# --- تایید یا رد فیش توسط ادمین ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_receipt_"))
+def approve_receipt_callback(call):
+    _, _, target_user_id, item_type, amount = call.data.split("_")
+    target_user_id = int(target_user_id)
+    amount = int(amount)
+
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    column = "coins" if item_type == "coin" else "diamonds"
+    cursor.execute(f"UPDATE users SET {column} = {column} + ? WHERE user_id = ?", (amount, target_user_id))
+    conn.commit()
+    conn.close()
+
+    asset_title = "سکه" if item_type == "coin" else "الماس"
+    bot.edit_message_caption(f"✅ فیش توسط شما تایید شد و **{amount:,} {asset_title}** به حساب کاربر اضافه گردید.", call.message.chat.id, call.message.message_id)
+    
+    try:
+        bot.send_message(target_user_id, f"🎉 **فیش واریزی شما تایید شد!**\nمقدار **{amount:,} {asset_title}** به حساب شما اضافه گردید.", parse_mode="Markdown")
+    except Exception:
+        pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reject_receipt_"))
+def reject_receipt_callback(call):
+    target_user_id = int(call.data.split("_")[2])
+    bot.edit_message_caption("❌ فیش توسط شما رد شد.", call.message.chat.id, call.message.message_id)
+    try:
+        bot.send_message(target_user_id, "❌ **فیش واریزی شما توسط مدیریت رد شد.**\nدر صورت وجود مشکل به پشتیبانی پیام دهید.")
+    except Exception:
+        pass
 
 # ----------------------------------------------------
 # اجرای ربات
