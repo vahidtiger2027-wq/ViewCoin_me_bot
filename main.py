@@ -57,6 +57,7 @@ def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
     markup.add("👤 حساب کاربری", "📥 ثبت تبلیغ")
+    markup.add("🔄 انتقال سکه و الماس")
     return markup
 
 # ----------------------------------------------------
@@ -159,7 +160,6 @@ def daily_reward_handler(message):
     conn.close()
 
     bot.send_message(user_id, f"🎉 **هدیه روزانه دریافت شد!**\n\n🟡 {daily_coin} سکه\n💎 {daily_diamond} الماس\nبه حساب شما اضافه شد.", parse_mode="Markdown")
-
 
 # ----------------------------------------------------
 # 📌 دکمه ۲: جذب زیرمجموعه
