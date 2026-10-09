@@ -57,8 +57,9 @@ def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add("🎁 هدیه روزانه", "👥 جذب زیرمجموعه")
     markup.add("👤 حساب کاربری", "📥 ثبت تبلیغ")
-    markup.add("🔄 انتقال سکه و الماس")
+    markup.add("🔄 انتقال سکه و الماس", "🛍️ فروشگاه")
     return markup
+
 
 # ----------------------------------------------------
 # دستور ویژه ادمین برای سکه و الماس بی‌نهایت جهت تست
