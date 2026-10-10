@@ -724,8 +724,10 @@ def lottery_entry_handler(message):
     for text, cd in packages:
         markup.add(types.InlineKeyboardButton(text, callback_data=cd))
     
-    # دکمه میانبر به فروشگاه
-    markup.add(types.InlineKeyboardButton("🛍️ ورود به فروشگاه (خرید و شارژ)", callback_data="shop_coins"))
+    # دکمه میانبر برای باز کردن کل منوی فروشگاه (مشابه دکمه اصلی فروشگاه)
+    btn_coin = types.InlineKeyboardButton("👁 خرید سکه ویوگیر", callback_data="shop_coins")
+    btn_diamond = types.InlineKeyboardButton("💎 خرید الماس ممبرگیر", callback_data="shop_diamonds")
+    markup.add(btn_coin, btn_diamond)
     
     bot.send_message(
         message.chat.id,
@@ -735,6 +737,7 @@ def lottery_entry_handler(message):
         reply_markup=markup,
         parse_mode="Markdown"
     )
+
 
 # --- پردازش انتخاب بسته بلیت ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_ticket_"))
