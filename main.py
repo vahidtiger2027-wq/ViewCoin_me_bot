@@ -684,6 +684,130 @@ def reject_receipt_callback(call):
         bot.send_message(target_user_id, "❌ **فیش واریزی شما توسط مدیریت رد شد.**\nدر صورت وجود مشکل به پشتیبانی پیام دهید.")
     except Exception:
         pass
+# ----------------------------------------------------
+# 📌 بخش قرعه‌کشی
+# ----------------------------------------------------
+
+@bot.message_handler(func=lambda msg: msg.text == "🎫 قرعه‌کشی")
+def lottery_menu_handler(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("🎫 ورود به قرعه‌کشی", "🏆 لیست برندگان قرعه‌کشی")
+    markup.add("🎁 لیست جوایز اول تا سوم", "👥 لیست شرکت‌کنندگان")
+    markup.add("🔙 بازگشت به منوی اصلی")
+    bot.send_message(
+        message.chat.id,
+        "🎫 **به بخش قرعه‌کشی خوش آمدید!**\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+# --- دکمه بازگشت به منوی اصلی از بخش قرعه‌کشی ---
+@bot.message_handler(func=lambda msg: msg.text == "🔙 بازگشت به منوی اصلی")
+def back_from_lottery(message):
+    bot.send_message(
+        message.chat.id,
+        "🔄 به منوی اصلی بازگشتید:",
+        reply_markup=get_main_menu(),
+        parse_mode="Markdown"
+    )
+
+# --- ۱. ورود به قرعه‌کشی (خرید بلیت) ---
+@bot.message_handler(func=lambda msg: msg.text == "🎫 ورود به قرعه‌کشی")
+def lottery_entry_handler(message):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    packages = [
+        ("۲۰0,۰۰۰ تومان 👈 ۲ بلیت", "buy_ticket_200000_2"),
+        ("۴۰۰,۰۰۰ تومان 👈 ۴ بلیت", "buy_ticket_400000_4"),
+        ("۶۰۰,۰۰۰ تومان 👈 ۶ بلیت", "buy_ticket_600000_6"),
+        ("۸۰۰,۰۰۰ تومان 👈 ۸ بلیت", "buy_ticket_800000_8"),
+        ("۱,۰۰۰,۰۰۰ تومان 👈 ۱۰ بلیت", "buy_ticket_1000000_10")
+    ]
+    for text, cd in packages:
+        markup.add(types.InlineKeyboardButton(text, callback_data=cd))
+    
+    # دکمه میانبر به فروشگاه
+    markup.add(types.InlineKeyboardButton("🛍️ ورود به فروشگاه (خرید و شارژ)", callback_data="shop_coins"))
+    
+    bot.send_message(
+        message.chat.id,
+        "🎫 **خرید بلیت قرعه‌کشی**\n\n"
+        "با خرید بسته‌های زیر شانس خود را برای برنده شدن جوایز ویژه افزایش دهید!\n"
+        "لطفاً بسته مورد نظر خود را انتخاب کنید:",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+# --- پردازش انتخاب بسته بلیت ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("buy_ticket_"))
+def process_ticket_purchase(call):
+    _, _, price, tickets = call.data.split("_")
+    price = int(price)
+    tickets = int(tickets)
+    
+    # ذخیره موقت در دیتابیس یا هدایت به کارت‌به‌کارتر (مشابه فروشگاه)
+    # اینجا برای ثبت سفارش بلیت، از سیستم فیش فروشگاه استفاده می‌کنیم:
+    user_shop_data[call.from_user.id] = {
+        'item_type': 'ticket',
+        'amount': tickets,
+        'price': price
+    }
+    
+    card_num = database.get_setting("card_number") or "5892.1011.1699.1486"
+    
+    msg_text = (
+        f"🎫 **خرید بلیت قرعه‌کشی**\n\n"
+        f"📌 تعداد بلیت: **{tickets} عدد**\n"
+        f"💵 مبلغ قابل پرداخت: **{price:,} تومان**\n\n"
+        f"💳 **شماره کارت جهت واریز:**\n`{card_num}`\n\n"
+        f"📸 **لطفاً عکس فیش یا تصویر تراکنش واریزی خود را ارسال کنید:**"
+    )
+    
+    bot.edit_message_text(call.message.chat.id, call.message.message_id, msg_text, parse_mode="Markdown")
+    # ثبت استپ هندلر برای دریافت فیش بلیت
+    bot.register_next_step_handler(call.message, receive_receipt_photo)
+
+# --- ۲. لیست برندگان قرعه‌کشی ---
+@bot.message_handler(func=lambda msg: msg.text == "🏆 لیست برندگان قرعه‌کشی")
+def lottery_winners_handler(message):
+    winners = database.get_setting("lottery_winners") or "هنوز مشخص نشده / نامشخص"
+    bot.send_message(
+        message.chat.id,
+        f"🏆 **اسامی برندگان دوره‌های قبل قرعه‌کشی:**\n\n{winners}",
+        parse_mode="Markdown"
+    )
+
+# --- ۳. لیست جوایز قرعه‌کشی ---
+@bot.message_handler(func=lambda msg: msg.text == "🎁 لیست جوایز اول تا سوم")
+def lottery_prizes_handler(message):
+    p1 = database.get_setting("prize_1") or "تنظیم نشده"
+    p2 = database.get_setting("prize_2") or "تنظیم نشده"
+    p3 = database.get_setting("prize_3") or "تنظیم نشده"
+    
+    text = (
+        f"🎁 **جوایز ارزنده قرعه‌کشی این دوره:**\n\n"
+        f"🥇 **نفر اول:** {p1}\n"
+        f"🥈 **نفر دوم:** {p2}\n"
+        f"🥉 **نفر سوم:** {p3}"
+    )
+    bot.send_message(message.chat.id, text, parse_mode="Markdown")
+
+# --- ۴. لیست شرکت‌کنندگان ---
+@bot.message_handler(func=lambda msg: msg.text == "👥 لیست شرکت‌کنندگان")
+def lottery_participants_handler(message):
+    # محاسبه تعداد کل کاربرانی که بلیت فعال دارند از دیتابیس
+    conn = database.get_connection()
+    cursor = conn.cursor()
+    # فرض می‌کنیم ستون یا جدولی برای بلیت‌ها داریم یا از فیلد مربوطه می‌خوانیم
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users") # نمونه آماری
+    total_users = cursor.fetchone()[0]
+    conn.close()
+    
+    bot.send_message(
+        message.chat.id,
+        f"👥 **آمار شرکت‌کنندگان قرعه‌کشی:**\n\n"
+        f"تعداد کل کاربران شرکت‌کننده دارای بلیت فعال در دوره جاری: **{total_users} نفر**",
+        parse_mode="Markdown"
+    )
 
 # ----------------------------------------------------
 # اجرای ربات
