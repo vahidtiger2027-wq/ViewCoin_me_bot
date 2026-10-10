@@ -5,7 +5,6 @@ import telebot
 from telebot import types
 import config
 import database
-import admin
 
 
 app = Flask('')
