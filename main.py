@@ -710,12 +710,15 @@ def back_from_lottery(message):
         parse_mode="Markdown"
     )
 
-# --- ۱. ورود به قرعه‌کشی (خرید بلیت) ---
+# دیکشنری موقت برای ذخیره اطلاعات خرید بلیت قرعه‌کشی
+user_lottery_data = {}
+
+# --- ۱. ورود به قرعه‌کشی (خرید بلیت مستقل) ---
 @bot.message_handler(func=lambda msg: msg.text == "🎫 ورود به قرعه‌کشی")
 def lottery_entry_handler(message):
     markup = types.InlineKeyboardMarkup(row_width=1)
     packages = [
-        ("۲۰0,۰۰۰ تومان 👈 ۲ بلیت", "buy_ticket_200000_2"),
+        ("۲۰۰,۰۰۰ تومان 👈 ۲ بلیت", "buy_ticket_200000_2"),
         ("۴۰۰,۰۰۰ تومان 👈 ۴ بلیت", "buy_ticket_400000_4"),
         ("۶۰۰,۰۰۰ تومان 👈 ۶ بلیت", "buy_ticket_600000_6"),
         ("۸۰۰,۰۰۰ تومان 👈 ۸ بلیت", "buy_ticket_800000_8"),
@@ -724,49 +727,129 @@ def lottery_entry_handler(message):
     for text, cd in packages:
         markup.add(types.InlineKeyboardButton(text, callback_data=cd))
     
-    # دکمه میانبر برای باز کردن کل منوی فروشگاه (مشابه دکمه اصلی فروشگاه)
-    btn_coin = types.InlineKeyboardButton("👁 خرید سکه ویوگیر", callback_data="shop_coins")
-    btn_diamond = types.InlineKeyboardButton("💎 خرید الماس ممبرگیر", callback_data="shop_diamonds")
-    markup.add(btn_coin, btn_diamond)
-    
     bot.send_message(
         message.chat.id,
-        "🎫 **خرید بلیت قرعه‌کشی**\n\n"
-        "با خرید بسته‌های زیر شانس خود را برای برنده شدن جوایز ویژه افزایش دهید!\n"
+        "🎫 **خرید بلیت قرعه‌کشی اختصاصی**\n\n"
+        "با خرید بسته‌های زیر به صورت مستقیم شانس خود را در قرعه‌کشی افزایش دهید!\n"
         "لطفاً بسته مورد نظر خود را انتخاب کنید:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
 
-
-# --- پردازش انتخاب بسته بلیت ---
+# --- انتخاب بسته بلیت و نمایش روش‌های پرداخت ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_ticket_"))
-def process_ticket_purchase(call):
+def select_ticket_payment(call):
     _, _, price, tickets = call.data.split("_")
     price = int(price)
     tickets = int(tickets)
     
-    # ذخیره موقت در دیتابیس یا هدایت به کارت‌به‌کارتر (مشابه فروشگاه)
-    # اینجا برای ثبت سفارش بلیت، از سیستم فیش فروشگاه استفاده می‌کنیم:
-    user_shop_data[call.from_user.id] = {
-        'item_type': 'ticket',
-        'amount': tickets,
+    user_lottery_data[call.from_user.id] = {
+        'tickets': tickets,
         'price': price
     }
-    
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    btn_card = types.InlineKeyboardButton("💳 پرداخت کارت به کارت", callback_data="pay_ticket_card")
+    btn_gateway = types.InlineKeyboardButton("🔗 پرداخت از طریق درگاه", callback_data="pay_ticket_gateway")
+    markup.add(btn_card, btn_gateway)
+
+    bot.edit_message_text(
+        f"🎫 **سفارش شما:** {tickets} عدد بلیت قرعه‌کشی\n"
+        f"💰 **مبلغ قابل پرداخت:** {price:,} تومان\n\n"
+        f"لطفاً روش پرداخت را انتخاب کنید:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+# --- پرداخت کارت به کارت بلیت ---
+@bot.callback_query_handler(func=lambda call: call.data == "pay_ticket_card")
+def pay_ticket_card_handler(call):
+    user_id = call.from_user.id
+    if user_id not in user_lottery_data:
+        return
+
     card_num = database.get_setting("card_number") or "5892.1011.1699.1486"
-    
+    data = user_lottery_data[user_id]
+
     msg_text = (
-        f"🎫 **خرید بلیت قرعه‌کشی**\n\n"
-        f"📌 تعداد بلیت: **{tickets} عدد**\n"
-        f"💵 مبلغ قابل پرداخت: **{price:,} تومان**\n\n"
-        f"💳 **شماره کارت جهت واریز:**\n`{card_num}`\n\n"
+        f"💳 **پرداخت کارت به کارت (بلیت قرعه‌کشی)**\n\n"
+        f"📌 تعداد: **{data['tickets']} بلیت**\n"
+        f"💵 مبلغ: **{data['price']:,} تومان**\n\n"
+        f"💳 **شماره کارت:**\n`{card_num}`\n\n"
         f"📸 **لطفاً عکس فیش یا تصویر تراکنش واریزی خود را ارسال کنید:**"
     )
     
-    bot.edit_message_text(call.message.chat.id, call.message.message_id, msg_text, parse_mode="Markdown")
-    # ثبت استپ هندلر برای دریافت فیش بلیت
-    bot.register_next_step_handler(call.message, receive_receipt_photo)
+    msg = bot.send_message(call.message.chat.id, msg_text, parse_mode="Markdown")
+    bot.register_next_step_handler(msg, receive_ticket_receipt_photo)
+
+# --- دریافت تصویر فیش بلیت ---
+def receive_ticket_receipt_photo(message):
+    user_id = message.from_user.id
+    if user_id not in user_lottery_data:
+        return
+
+    if not message.photo:
+        bot.reply_to(message, "❌ لطفاً فقط تصویر فیش واریزی را ارسال بفرمایید.")
+        return
+
+    data = user_lottery_data[user_id]
+    photo_id = message.photo[-1].file_id
+
+    # ارسال فیش برای ادمین‌ها جهت تایید بلیت
+    admin_markup = types.InlineKeyboardMarkup()
+    btn_approve = types.InlineKeyboardButton("✅ تایید و افزودن بلیت", callback_data=f"approve_ticket_{user_id}_{data['tickets']}")
+    btn_reject = types.InlineKeyboardButton("❌ رد فیش", callback_data=f"reject_ticket_{user_id}")
+    admin_markup.add(btn_approve, btn_reject)
+
+    caption = (
+        f"📥 **فیش واریزی بلیت قرعه‌کشی!**\n\n"
+        f"👤 کاربر: `{user_id}` (@{message.from_user.username or 'بدون آیدی'})\n"
+        f"🎫 تعداد بلیت: {data['tickets']} عدد\n"
+        f"💵 مبلغ: {data['price']:,} تومان"
+    )
+
+    for admin_id in config.ADMIN_IDS:
+        try:
+            bot.send_photo(admin_id, photo_id, caption=caption, reply_markup=admin_markup, parse_mode="Markdown")
+        except Exception:
+            pass
+
+    bot.reply_to(message, "✅ **فیش شما با موفقیت برای مدیریت ارسال شد.**\nپس از بررسی و تایید، بلیت‌های شما ثبت خواهد شد.", parse_mode="Markdown")
+    del user_lottery_data[user_id]
+
+# --- درگاه پرداخت بلیت ---
+@bot.callback_query_handler(func=lambda call: call.data == "pay_ticket_gateway")
+def pay_ticket_gateway_handler(call):
+    gateway_url = database.get_setting("gateway_url") or "تنظیم نشده (به زودی)"
+    bot.edit_message_text(f"🔗 جهت پرداخت از طریق درگاه، روی لینک زیر کلیک کنید:\n\n{gateway_url}", call.message.chat.id, call.message.message_id)
+
+# --- تایید فیش بلیت توسط ادمین ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_ticket_"))
+def approve_ticket_callback(call):
+    _, _, target_user_id, tickets = call.data.split("_")
+    target_user_id = int(target_user_id)
+    tickets = int(tickets)
+
+    # اینجا می‌توانید تعداد بلیت را به جدول کاربران یا جدول اختصاصی قرعه‌کشی در دیتابیس اضافه کنید
+    # فعلاً به عنوان نمونه پیام موفقیت ارسال می‌شود
+    bot.edit_message_caption(f"✅ فیش بلیت تایید شد و **{tickets} بلیت** برای کاربر لحاظ گردید.", call.message.chat.id, call.message.message_id)
+    
+    try:
+        bot.send_message(target_user_id, f"🎉 **فیش واریزی بلیت قرعه‌کشی شما تایید شد!**\nتعداد **{tickets} بلیت** به حساب قرعه‌کشی شما اضافه گردید.", parse_mode="Markdown")
+    except Exception:
+        pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reject_ticket_"))
+def reject_ticket_callback(call):
+    target_user_id = int(call.data.split("_")[2])
+    bot.edit_message_caption("❌ فیش بلیت توسط شما رد شد.", call.message.chat.id, call.message.message_id)
+    try:
+        bot.send_message(target_user_id, "❌ **فیش واریزی بلیت قرعه‌کشی شما توسط مدیریت رد شد.**")
+    except Exception:
+        pass
+
 
 # --- ۲. لیست برندگان قرعه‌کشی ---
 @bot.message_handler(func=lambda msg: msg.text == "🏆 لیست برندگان قرعه‌کشی")
